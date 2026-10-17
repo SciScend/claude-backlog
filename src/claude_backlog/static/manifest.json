@@ -1,0 +1,9 @@
+{
+  "name": "Claude Backlog",
+  "short_name": "Backlog",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#e9edf2",
+  "theme_color": "#1b2433",
+  "icons": [{ "src": "/static/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}

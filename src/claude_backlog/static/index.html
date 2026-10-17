@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#e9edf2" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#121a26" media="(prefers-color-scheme: dark)">
+<title>Claude Backlog</title>
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<link rel="manifest" href="/static/manifest.json">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="top">
+  <div class="top-row">
+    <h1>Claude Backlog</h1>
+    <div class="meter" id="meter" title="Weekly usage">
+      <div class="meter-track"><div class="meter-fill" id="meter-fill"></div>
+        <button class="meter-mark" id="meter-mark" type="button"
+                aria-label="Change where the queue stops"></button></div>
+      <div class="meter-text" id="meter-text">Reading usage...</div>
+    </div>
+    <div class="controls">
+      <div class="split">
+        <button class="btn primary" id="run-now" type="button">Run now</button>
+        <button class="btn primary more" id="run-menu-btn" type="button"
+                aria-label="More run options" aria-haspopup="true">+</button>
+        <div class="menu" id="run-menu" hidden>
+          <label>Start no new task after
+            <input type="time" id="run-until"></label>
+          <button class="btn" id="run-until-go" type="button">Run until then</button>
+        </div>
+      </div>
+      <div class="split" id="stop-wrap" hidden>
+        <button class="btn" id="stop" type="button">Stop after this task</button>
+        <button class="btn danger" id="stop-now" type="button">Stop now</button>
+      </div>
+      <button class="btn ghost" id="open-settings" type="button">Settings</button>
+    </div>
+  </div>
+  <div class="status-row">
+    <p id="status-line" class="status-line">Loading...</p>
+    <label class="switch" title="Start the queue when the screensaver has been on for a while">
+      <input type="checkbox" id="away-toggle">
+      <span id="away-label">Start when I am away</span>
+    </label>
+  </div>
+  <div id="warnings" class="warnings" hidden></div>
+</header>
+
+<nav class="tabs" id="tabs" aria-label="Columns">
+  <button type="button" data-col="queue" class="active">Queue <span data-count="queue"></span></button>
+  <button type="button" data-col="running">Running <span data-count="running"></span></button>
+  <button type="button" data-col="done">Done <span data-count="done"></span></button>
+  <button type="button" data-col="hold">On hold <span data-count="hold"></span></button>
+</nav>
+
+<main class="board" id="board">
+  <section class="col col-hold" data-col="hold">
+    <h2>On hold <span class="count" data-count="hold"></span></h2>
+    <div class="list drop" data-status="hold" data-priority="2"></div>
+    <button class="btn add" type="button" data-new="hold">New task on hold</button>
+  </section>
+  <section class="col col-queue active" data-col="queue">
+    <h2>Queue <span class="count" data-count="queue"></span></h2>
+    <div class="group"><h3>High</h3><div class="list drop" data-status="queued" data-priority="1"></div></div>
+    <div class="group"><h3>Normal</h3><div class="list drop" data-status="queued" data-priority="2"></div></div>
+    <div class="group"><h3>Low</h3><div class="list drop" data-status="queued" data-priority="3"></div></div>
+    <button class="btn add" type="button" data-new="queued">New task</button>
+  </section>
+  <section class="col col-running" data-col="running">
+    <h2>Running</h2>
+    <div class="list" id="running-list"></div>
+  </section>
+  <section class="col col-done" data-col="done">
+    <h2>Needs attention <span class="count" data-count="attention"></span></h2>
+    <div class="list" data-status="attention"></div>
+    <h2>Done <span class="count" data-count="done"></span></h2>
+    <div class="list" data-status="done"></div>
+  </section>
+</main>
+
+<aside class="panel" id="panel" hidden aria-label="Task details">
+  <div class="panel-head">
+    <h2 id="panel-title"></h2>
+    <button class="btn ghost" id="panel-close" type="button">Close</button>
+  </div>
+  <nav class="panel-tabs" id="panel-tabs">
+    <button type="button" data-tab="overview" class="active">Overview</button>
+    <button type="button" data-tab="edit">Prompt and settings</button>
+    <button type="button" data-tab="log">Log</button>
+    <button type="button" data-tab="changes">Changes</button>
+  </nav>
+  <div class="panel-body" id="panel-body"></div>
+</aside>
+
+<dialog id="new-dialog">
+  <form id="new-form" method="dialog">
+    <h2>New task</h2>
+    <label>Project folder
+      <input name="project_dir" list="project-list" required autocomplete="off"
+             placeholder="/path/to/project">
+      <datalist id="project-list"></datalist>
+      <small id="project-info" class="hint"></small>
+    </label>
+    <label>Prompt
+      <textarea name="prompt" rows="10" required
+        placeholder="Write it for someone who cannot ask you anything: the goal, the files involved, how to check the result, and when it is done."></textarea>
+    </label>
+    <label>Title <input name="title" placeholder="From the first line of the prompt"></label>
+    <div class="row">
+      <label>Priority
+        <select name="priority"><option value="high">High</option>
+          <option value="normal" selected>Normal</option><option value="low">Low</option></select></label>
+      <label>Put in
+        <select name="status"><option value="queued">Queue</option>
+          <option value="hold">On hold</option></select></label>
+      <label id="base-branch-wrap" hidden>Start from branch
+        <select name="base_branch" id="base-branch"></select></label>
+    </div>
+    <details>
+      <summary>Model, effort and limits</summary>
+      <div class="row">
+        <label>Model <input name="model" placeholder="Default"></label>
+        <label>Effort
+          <select name="effort"><option value="">Default</option><option>low</option>
+            <option>medium</option><option>high</option><option>xhigh</option>
+            <option>max</option></select></label>
+        <label>5-hour windows per attempt <input name="max_windows" placeholder="Default"></label>
+        <label>Attempts <input name="max_attempts" type="number" min="1" placeholder="Default"></label>
+      </div>
+    </details>
+    <p class="form-error" id="new-error" hidden></p>
+    <div class="actions">
+      <button class="btn" value="cancel" formnovalidate type="submit">Cancel</button>
+      <button class="btn primary" id="new-submit" type="button">Add task</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="settings-dialog">
+  <form id="settings-form" method="dialog">
+    <h2>Settings</h2>
+    <fieldset>
+      <legend>Weekly limit</legend>
+      <label>Stop when weekly usage reaches (%)
+        <input name="threshold" type="number" min="1" max="100" step="1" required></label>
+    </fieldset>
+    <fieldset>
+      <legend>When I am away</legend>
+      <label class="inline"><input name="away_enabled" type="checkbox"> Start the queue when I am away</label>
+      <label>Away means the screensaver has been on for (minutes)
+        <input name="away_minutes" type="number" min="1" required></label>
+      <label>When I come back to a run that started by itself
+        <select name="on_return"><option value="stop">Stop it now (it resumes next time)</option>
+          <option value="finish">Let the current task finish</option></select></label>
+      <small class="hint" id="presence-info"></small>
+    </fieldset>
+    <fieldset>
+      <legend>Defaults for new tasks</legend>
+      <div class="row">
+        <label>Model <input name="model" placeholder="Claude's default"></label>
+        <label>Effort
+          <select name="effort"><option value="">Claude's default</option><option>low</option>
+            <option>medium</option><option>high</option><option>xhigh</option>
+            <option>max</option></select></label>
+        <label>5-hour windows per attempt <input name="max_windows"></label>
+        <label>Attempts <input name="max_attempts" type="number" min="1"></label>
+      </div>
+      <label>Folders that hold your projects (one per line)
+        <textarea name="project_roots" rows="3"></textarea></label>
+    </fieldset>
+    <fieldset>
+      <legend>Phone</legend>
+      <label>Your Tailscale login
+        <input name="tailscale_login" placeholder="you@example.com" autocomplete="off"></label>
+      <div id="phone-info" class="phone-info"></div>
+    </fieldset>
+    <p class="form-error" id="settings-error" hidden></p>
+    <div class="actions">
+      <button class="btn" value="cancel" formnovalidate type="submit">Cancel</button>
+      <button class="btn primary" id="settings-save" type="button">Save settings</button>
+    </div>
+  </form>
+</dialog>
+
+<div class="toast" id="toast" role="status" hidden></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

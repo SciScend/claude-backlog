@@ -1,0 +1,80 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "claude-backlog"
+dynamic = ["version"]
+description = "A backlog board for Claude Code: queue long tasks, and Claude works through them while you are away, up to the share of the weekly limit you choose."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [{ name = "Iva Popova", email = "iva.e.popova@gmail.com" }]
+keywords = ["claude", "claude-code", "anthropic", "automation", "backlog", "agents"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Web Environment",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development",
+    "Topic :: Utilities",
+]
+dependencies = [
+    "claude-nightshift",
+    "markdown-it-py>=3.0",
+    "qrcode>=7.4",
+    "starlette>=0.37",
+    "uvicorn>=0.29",
+]
+
+[project.optional-dependencies]
+dev = [
+    "httpx2",
+    "pytest>=7.4",
+    "ruff>=0.6",
+]
+
+[project.urls]
+Homepage = "https://github.com/SciScend/claude-backlog"
+Source = "https://github.com/SciScend/claude-backlog"
+Issues = "https://github.com/SciScend/claude-backlog/issues"
+
+[project.scripts]
+claude-backlog = "claude_backlog.cli:run_cli"
+
+# Until nightshift's --usage-json, --status-file and exit code 5 are
+# released, develop against a sibling checkout. Before publishing, point this
+# at the nightshift release on GitHub.
+[tool.uv.sources]
+claude-nightshift = { path = "../claude-nightshift", editable = true }
+
+[tool.hatch.version]
+path = "src/claude_backlog/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/claude_backlog"]
+
+[tool.hatch.build.targets.sdist]
+include = ["/src", "/tests", "/docs", "/README.md", "/LICENSE"]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+addopts = "-ra --strict-markers --strict-config"
+filterwarnings = ["error"]
+
+[tool.ruff]
+line-length = 92
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "RUF"]
+# __all__ lists are ordered by meaning, not alphabetically.
+ignore = ["RUF022"]
