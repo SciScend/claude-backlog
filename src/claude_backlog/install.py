@@ -104,8 +104,19 @@ def setup_phone(port) -> int:
         print("Phone access needs Tailscale: https://tailscale.com/download")
         return 1
     target = f"http://127.0.0.1:{port + 1}"
-    result = subprocess.run(["tailscale", "serve", "--bg", "--https=443", target],
-                            capture_output=True, text=True)
+    try:
+        result = subprocess.run(["tailscale", "serve", "--bg", "--https=443", target],
+                                capture_output=True, text=True, timeout=30)
+    except subprocess.TimeoutExpired as exc:
+        # tailscale serve waits for ever when Serve is not enabled on the
+        # tailnet; its output then holds the page that enables it.
+        out = exc.stdout or b""
+        out = out.decode(errors="replace") if isinstance(out, bytes) else out
+        print("tailscale serve did not finish:")
+        print("  " + (out.strip() or "(no output)").replace("\n", "\n  "))
+        print("Enable Serve (and HTTPS certificates) for your tailnet at the address "
+              "above, then run 'claude-backlog install --phone' again.")
+        return 1
     if result.returncode != 0:
         print("tailscale serve failed:")
         print("  " + (result.stderr.strip() or result.stdout.strip()))

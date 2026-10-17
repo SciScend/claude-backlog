@@ -85,3 +85,20 @@ def test_report_quotes_summaries(conn, plain_dir, backlog_home):
     assert "> # Summary" in text
     assert report.summary_line("the queue is empty", [attempt]).startswith(
         "Stopped: the queue is empty. 1 done")
+
+
+def test_phone_setup_shows_the_enable_link_when_serve_hangs(monkeypatch, capsys):
+    import subprocess
+
+    from claude_backlog import install
+
+    def hang(cmd, **kwargs):
+        raise subprocess.TimeoutExpired(cmd, kwargs["timeout"],
+                                        output=b"Serve is not enabled.\nhttps://enable\n")
+
+    monkeypatch.setattr(install.shutil, "which", lambda name: "/usr/bin/" + name)
+    monkeypatch.setattr(install.subprocess, "run", hang)
+    assert install.setup_phone(8765) == 1
+    out = capsys.readouterr().out
+    assert "https://enable" in out
+    assert "install --phone' again" in out
