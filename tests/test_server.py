@@ -301,6 +301,39 @@ def test_projects_and_folders(client, tmp_path):
     assert client.get("/api/folders", params={"path": "/no/such"}).json()["folders"] == []
 
 
+def test_projects_through_a_symlink_listed_once(client, tmp_path):
+    import os
+
+    real = tmp_path / "data" / "projects"
+    for name in ("app", "other"):
+        (real / name).mkdir(parents=True)
+        (real / name / "pyproject.toml").write_text("")
+    link = tmp_path / "projects"
+    link.symlink_to(real, target_is_directory=True)
+    real = real.resolve()
+
+    def listed():
+        data = client.get("/api/projects").json()
+        return data["recent"] + data["folders"]
+
+    def assert_once(paths):
+        reals = [os.path.realpath(p) for p in paths]
+        assert sorted(reals) == sorted(set(reals)), paths
+        assert set(reals) == {str(real / "app"), str(real / "other")}
+
+    client.put("/api/settings", json={"project_roots": [str(link)]})
+    r = post(client, "/api/tasks", {"prompt": "Do it", "project_dir": str(link / "app")})
+    assert r.status_code == 200, r.text
+    data = client.get("/api/projects").json()
+    assert data["recent"] == [str(real / "app")]
+    assert data["folders"] == [str(link / "other")]
+    assert_once(listed())
+    # Two roots that are the same real folder count as one.
+    roots = [str(link), str(real), str(tmp_path)]
+    client.put("/api/settings", json={"project_roots": roots})
+    assert_once(listed())
+
+
 # --- the prompt drafted in the background ----------------------------------------
 
 

@@ -806,7 +806,7 @@ async function loadProjects() {
     picker.home = data.home || "";
     picker.projects = [
       ...data.recent.map((path) => ({ path, group: "Recent" })),
-      ...data.folders.filter((p) => !data.recent.includes(p)).map((path) => ({ path, group: "Projects" })),
+      ...data.folders.map((path) => ({ path, group: "Projects" })),
     ];
   } catch (err) { picker.projects = []; }
   picker.folders.clear();

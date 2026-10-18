@@ -493,27 +493,43 @@ def _subfolders(path: Path) -> list[Path]:
         return []
 
 
-def find_projects(roots) -> list[str]:
-    """Project folders up to two levels below each root."""
+def _once(paths, seen=None) -> list:
+    """Each real folder once, under the first path it was given as.
+
+    A folder reached through a symlink (say ~/projects -> /data/projects) has
+    several paths; `seen` holds the real paths already listed elsewhere."""
+    seen = set() if seen is None else seen
+    unique = []
+    for path in paths:
+        real = os.path.realpath(path)
+        if real not in seen:
+            seen.add(real)
+            unique.append(path)
+    return unique
+
+
+def find_projects(roots, seen=None) -> list[str]:
+    """Project folders up to two levels below each root, each real folder once."""
     found = []
-    for root in roots:
+    for root in _once(roots):
         for child in _subfolders(root):
             if _is_project(child):
                 found.append(str(child))
                 continue
             found += [str(p) for p in _subfolders(child) if _is_project(p)]
-    return list(dict.fromkeys(found))
+    return _once(found, seen)
 
 
 def list_projects(request, _):
     conn = _svc(request).conn()
     conf = settings.get_all(conn)
-    recent = [r["project_dir"] for r in conn.execute(
+    seen = set()
+    recent = _once([r["project_dir"] for r in conn.execute(
         "SELECT project_dir, MAX(created_at) AS last FROM tasks GROUP BY project_dir "
-        "ORDER BY last DESC LIMIT 10")]
+        "ORDER BY last DESC LIMIT 10")], seen)
     roots = [Path(os.path.expanduser(r)) for r in conf["project_roots"]]
     roots += [Path(r).parent for r in recent]
-    return {"recent": recent, "folders": find_projects(dict.fromkeys(roots)),
+    return {"recent": recent, "folders": find_projects(roots, seen),
             "home": str(Path.home())}
 
 

@@ -242,6 +242,12 @@ filters the list; it offers, in this order:
   any folder can be reached by typing it (Tab goes into the highlighted
   folder).
 
+A folder reachable under several paths through symlinks (say `~/projects`
+is a link to `/data/projects`) is offered once, under the first path it was
+found as: a recent project with the path its tasks store, otherwise the path
+under the first project root that reaches it. Project roots that are the
+same real folder count as one.
+
 Arrow keys move, Enter picks, Esc closes. Under the field the form says
 whether the folder is a git repository (the task gets its own branch) or
 not (it then runs in the folder itself, without a branch, see section 6),
