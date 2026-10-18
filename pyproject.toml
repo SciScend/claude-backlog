@@ -48,11 +48,10 @@ Issues = "https://github.com/SciScend/claude-backlog/issues"
 [project.scripts]
 claude-backlog = "claude_backlog.cli:run_cli"
 
-# Until nightshift's --usage-json, --status-file and exit code 5 are
-# released, develop against a sibling checkout. Before publishing, point this
-# at the nightshift release on GitHub.
+# claude-nightshift is not on PyPI yet. To develop both together, point this
+# at a sibling checkout: { path = "../claude-nightshift", editable = true }
 [tool.uv.sources]
-claude-nightshift = { path = "../claude-nightshift", editable = true }
+claude-nightshift = { git = "https://github.com/SciScend/claude-nightshift", branch = "main" }
 
 [tool.hatch.version]
 path = "src/claude_backlog/__init__.py"

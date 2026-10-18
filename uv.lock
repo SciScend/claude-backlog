@@ -42,7 +42,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "claude-nightshift", editable = "../claude-nightshift" },
+    { name = "claude-nightshift", git = "https://github.com/SciScend/claude-nightshift?branch=main" },
     { name = "httpx2", marker = "extra == 'dev'" },
     { name = "markdown-it-py", specifier = ">=3.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.4" },
@@ -55,15 +55,8 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "claude-nightshift"
-source = { editable = "../claude-nightshift" }
-
-[package.metadata]
-requires-dist = [
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.4" },
-    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.1" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
-]
-provides-extras = ["dev"]
+version = "1.0.0"
+source = { git = "https://github.com/SciScend/claude-nightshift?branch=main#29b8fbaa85c41bc463ea2ba85bb4a36ba9069a27" }
 
 [[package]]
 name = "click"
