@@ -2,7 +2,8 @@ import pytest
 from starlette.testclient import TestClient
 
 from claude_backlog import settings, tasks
-from claude_backlog.server import Service, create_app
+from claude_backlog.server import MAX_CHANGED_FILES, Service, create_app
+from conftest import git
 
 LOCAL = "http://127.0.0.1:8765"
 
@@ -172,6 +173,112 @@ def test_project_info(client, repo, plain_dir):
     assert info["git"] is False
     assert client.get("/api/project-info", params={"path": "/no/such"}).json() == {
         "exists": False}
+
+
+def test_project_changes(client, repo):
+    changes = client.get("/api/project-changes", params={"path": str(repo)}).json()
+    assert changes == {"root": str(repo), "branch": "main", "files": [], "total": 0}
+    (repo / "README.md").write_text("changed\n")
+    (repo / "new file.txt").write_text("new\n")
+    changes = client.get("/api/project-changes", params={"path": str(repo)}).json()
+    assert changes["files"] == [{"status": " M", "path": "README.md"},
+                                {"status": "??", "path": "new file.txt"}]
+    assert changes["total"] == 2
+    for i in range(MAX_CHANGED_FILES + 5):
+        (repo / f"extra-{i:02}.txt").write_text("x\n")
+    changes = client.get("/api/project-changes", params={"path": str(repo)}).json()
+    assert len(changes["files"]) == MAX_CHANGED_FILES
+    assert changes["total"] == MAX_CHANGED_FILES + 7
+
+
+def test_project_changes_needs_a_repository(client, plain_dir):
+    r = client.get("/api/project-changes", params={"path": str(plain_dir)})
+    assert r.status_code == 400
+    assert "not a git repository" in r.json()["error"]
+
+
+def test_commit_now(client, repo):
+    (repo / ".gitignore").write_text("secret.txt\n")
+    (repo / "secret.txt").write_text("do not commit\n")
+    (repo / "README.md").write_text("changed\n")
+    (repo / "notes.md").write_text("new\n")
+    r = post(client, "/api/project-commit",
+             {"path": str(repo), "message": "Save my work before the task"})
+    assert r.status_code == 200, r.text
+    assert r.json()["branch"] == "main"
+    assert r.json()["commit"] == git(repo, "rev-parse", "--short", "HEAD")
+    assert git(repo, "status", "--porcelain") == ""
+    assert git(repo, "log", "-1", "--format=%s") == "Save my work before the task"
+    assert git(repo, "ls-files") == ".gitignore\nREADME.md\nnotes.md"
+    assert (repo / "secret.txt").exists()
+    info = client.get("/api/project-info", params={"path": str(repo)}).json()
+    assert info["dirty"] is False
+
+
+def test_commit_now_refuses(client, repo, plain_dir):
+    (repo / "README.md").write_text("changed\n")
+    for message in ("", "   "):
+        r = post(client, "/api/project-commit", {"path": str(repo), "message": message})
+        assert r.status_code == 400
+        assert "commit message" in r.json()["error"]
+    r = post(client, "/api/project-commit", {"path": str(plain_dir), "message": "Save"})
+    assert r.status_code == 400
+    assert "not a git repository" in r.json()["error"]
+    assert git(repo, "log", "-1", "--format=%s") == "first"
+    git(repo, "checkout", "-q", "--", "README.md")
+    r = post(client, "/api/project-commit", {"path": str(repo), "message": "Save"})
+    assert r.status_code == 409
+    assert "nothing to commit" in r.json()["error"]
+
+
+def test_commit_now_refuses_a_detached_head(client, repo):
+    git(repo, "checkout", "-q", "--detach")
+    (repo / "README.md").write_text("changed\n")
+    r = post(client, "/api/project-commit", {"path": str(repo), "message": "Save"})
+    assert r.status_code == 409
+    assert "detached HEAD" in r.json()["error"]
+    assert git(repo, "status", "--porcelain") == "M README.md"
+
+
+def test_commit_now_needs_a_git_identity(client, tmp_path, monkeypatch):
+    empty = tmp_path / "empty-gitconfig"
+    empty.write_text("")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(empty))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    for name in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME",
+                 "GIT_COMMITTER_EMAIL", "EMAIL"):
+        monkeypatch.delenv(name, raising=False)
+    path = tmp_path / "anonymous"
+    path.mkdir()
+    git(path, "init", "-q", "-b", "main")
+    (path / "a.txt").write_text("a\n")
+    git(path, "add", ".")
+    git(path, "-c", "user.name=Setup", "-c", "user.email=setup@example.com",
+        "commit", "-q", "-m", "first")
+    (path / "a.txt").write_text("changed\n")
+    r = post(client, "/api/project-commit", {"path": str(path), "message": "Save"})
+    assert r.status_code == 409
+    error = r.json()["error"]
+    assert "does not know who you are" in error
+    assert "git config --global user.email" in error
+    assert git(path, "log", "-1", "--format=%s") == "first"
+    assert git(path, "status", "--porcelain") == "M a.txt"
+
+
+def test_commit_now_runs_the_hooks(client, repo):
+    hook = repo / ".git" / "hooks" / "pre-commit"
+    hook.write_text("#!/bin/sh\necho 'lint failed: README.md is too short' >&2\nexit 1\n")
+    hook.chmod(0o755)
+    (repo / "README.md").write_text("changed\n")
+    (repo / "notes.md").write_text("new\n")
+    r = post(client, "/api/project-commit", {"path": str(repo), "message": "Save"})
+    assert r.status_code == 409
+    error = r.json()["error"]
+    assert "still uncommitted" in error
+    assert "lint failed: README.md is too short" in error
+    assert git(repo, "log", "-1", "--format=%s") == "first"
+    # Nothing is left staged either: the index is as it was.
+    assert git(repo, "status", "--porcelain") == "M README.md\n?? notes.md"
 
 
 def test_projects_and_folders(client, tmp_path):

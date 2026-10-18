@@ -549,6 +549,38 @@ def project_info(request, _):
     }
 
 
+# How many changed files the new task form lists before "and N more".
+MAX_CHANGED_FILES = 50
+
+
+def _project_repo(folder) -> gitops.RepoInfo:
+    path = Path(os.path.expanduser(folder or ""))
+    if not folder or not path.is_dir():
+        raise tasks.TaskError("This folder does not exist.")
+    info = gitops.repo_info(path)
+    if info is None:
+        raise tasks.TaskError("This folder is not a git repository.")
+    return info
+
+
+def project_changes(request, _):
+    """The uncommitted changes of a project's repository, for "Commit now"."""
+    info = _project_repo(request.query_params.get("path", ""))
+    files = gitops.changed_files(info.root)
+    return {"root": info.root, "branch": info.branch,
+            "files": files[:MAX_CHANGED_FILES], "total": len(files)}
+
+
+def project_commit(request, data):
+    """Commit all changes of a project's repository on its current branch."""
+    message = str(data.get("message") or "").strip()
+    if not message:
+        raise tasks.TaskError("Write a commit message first.")
+    info = _project_repo(str(data.get("path") or ""))
+    commit = gitops.commit_changes(info.root, message)
+    return {"commit": commit, "branch": info.branch}
+
+
 def latest_report(request, _):
     path = report.latest()
     return {"path": str(path) if path else None, "text": _read(path) if path else None}
@@ -707,6 +739,8 @@ def create_app(service: Service, on_shutdown=None) -> Starlette:
         Route("/api/projects", h(list_projects)),
         Route("/api/folders", h(list_folders)),
         Route("/api/project-info", h(project_info)),
+        Route("/api/project-changes", h(project_changes)),
+        Route("/api/project-commit", h(project_commit), methods=["POST"]),
         Route("/api/report", h(latest_report)),
         Route("/api/phone", h(phone_info)),
         Route("/api/phone/qr.svg", h(phone_qr)),
