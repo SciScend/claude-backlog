@@ -3,7 +3,7 @@
   "short_name": "Backlog",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#e9edf2",
+  "background_color": "#eef1f5",
   "theme_color": "#1b2433",
   "icons": [{ "src": "/static/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
 }

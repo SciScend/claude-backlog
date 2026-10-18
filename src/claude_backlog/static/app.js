@@ -128,6 +128,7 @@ function renderHeader() {
   $("#stop").textContent = runner.stop_mode === "after" ? "Stopping after this task" : "Stop after this task";
 
   $("#status-line").innerHTML = statusLine();
+  $("#status-line").classList.toggle("busy", busy);
   $("#away-toggle").checked = settings.away_enabled;
   let away = `Start when I am away (after ${settings.away_minutes} min of screensaver)`;
   if (presence && !presence.detector && presence.read_at) away = "Start when I am away (not available on this desktop)";
@@ -168,6 +169,20 @@ function plural(n, word) {
   return `${n} ${word}${n === 1 ? "" : "s"}`;
 }
 
+// Small line icons for the move buttons on phone cards.
+const ICON_PATHS = {
+  top: "M3 3h10M8 13V6.5M4.5 10 8 6.5l3.5 3.5",
+  up: "M8 13V3.5M4 7.5l4-4 4 4",
+  down: "M8 3v9.5M4 8.5l4 4 4-4",
+  hold: "M6 3.5v9M10 3.5v9",
+  queue: "M5 3.5 11.5 8 5 12.5z",
+  retry: "M12.5 8A4.5 4.5 0 1 1 11.2 4.8M12 2.5v2.8H9.2",
+};
+
+function icon(name) {
+  return `<svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="${ICON_PATHS[name]}"/></svg>`;
+}
+
 function ticket(task) {
   const meta = [`<span>${esc(task.project_name)}</span>`];
   if (task.status === "drafting") meta.unshift('<span class="drafting-mark">Claude is writing the prompt</span>');
@@ -193,19 +208,19 @@ function ticket(task) {
   let moves = "";
   if (task.status === "queued") {
     moves = `<div class="moves">
-      <button class="btn small" data-move="top">Top</button>
-      <button class="btn small" data-move="up">Up</button>
-      <button class="btn small" data-move="down">Down</button>
-      <button class="btn small" data-move="hold">Hold</button></div>`;
+      <button class="btn small" data-move="top">${icon("top")}Top</button>
+      <button class="btn small" data-move="up">${icon("up")}Up</button>
+      <button class="btn small" data-move="down">${icon("down")}Down</button>
+      <button class="btn small" data-move="hold">${icon("hold")}Hold</button></div>`;
   } else if (task.status === "hold" && task.draft_error) {
-    moves = `<div class="moves"><button class="btn small" data-move="redraft">Retry the draft</button>
+    moves = `<div class="moves"><button class="btn small" data-move="redraft">${icon("retry")}Retry the draft</button>
       <button class="btn small" data-move="write">Write it myself</button></div>`;
   } else if (task.status === "hold" && task.blocking) {
     moves = `<div class="moves"><button class="btn small" data-move="answer">Answer</button></div>`;
   } else if (task.status === "hold") {
-    moves = `<div class="moves"><button class="btn small" data-move="queue">Queue it</button></div>`;
+    moves = `<div class="moves"><button class="btn small" data-move="queue">${icon("queue")}Queue it</button></div>`;
   } else if (task.status === "attention" || task.status === "done") {
-    moves = `<div class="moves"><button class="btn small" data-move="retry">Run again</button></div>`;
+    moves = `<div class="moves"><button class="btn small" data-move="retry">${icon("retry")}Run again</button></div>`;
   }
   const isNew = task.new && (task.status === "done" || task.status === "attention");
   return `<article class="ticket ${task.status}" data-id="${esc(task.id)}"
