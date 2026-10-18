@@ -1,5 +1,7 @@
+import datetime
 import json
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -107,3 +109,32 @@ def test_draft_errors(plain_dir, monkeypatch):
     monkeypatch.setenv(draft.CLAUDE_ENV, "/nonexistent/claude")
     with pytest.raises(draft.DraftError, match="not installed"):
         draft.draft("x", str(plain_dir), "")
+
+
+def test_a_usage_limit_is_drafted_again_after_the_reset(plain_dir, monkeypatch):
+    monkeypatch.setenv("FAKE_CLAUDE_MODE", "limit")
+    reset = (datetime.datetime.now() + datetime.timedelta(hours=2)).replace(
+        second=0, microsecond=0)
+    clock = reset.strftime("%I:%M%p").lstrip("0").lower()
+    monkeypatch.setenv("FAKE_CLAUDE_LIMIT",
+                       f"You've hit your session limit - resets {clock} (Europe/Sofia)")
+    with pytest.raises(draft.DraftError, match="session limit") as caught:
+        draft.draft("x", str(plain_dir), "")
+    assert caught.value.retry_at == reset.timestamp() + draft.RESET_MARGIN
+
+
+def test_a_usage_limit_without_a_reset_time_is_drafted_again_later(plain_dir,
+                                                                    monkeypatch):
+    monkeypatch.setenv("FAKE_CLAUDE_MODE", "limit")
+    before = time.time()
+    with pytest.raises(draft.DraftError) as caught:
+        draft.draft("x", str(plain_dir), "")
+    assert before + draft.LIMIT_RETRY <= caught.value.retry_at <= \
+        time.time() + draft.LIMIT_RETRY
+
+
+def test_other_failures_are_not_drafted_again(plain_dir, monkeypatch):
+    monkeypatch.setenv("FAKE_CLAUDE_MODE", "error")
+    with pytest.raises(draft.DraftError) as caught:
+        draft.draft("x", str(plain_dir), "")
+    assert caught.value.retry_at is None

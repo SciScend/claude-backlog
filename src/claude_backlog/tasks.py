@@ -28,6 +28,7 @@ __all__ = [
     "start_draft",
     "finish_draft",
     "fail_draft",
+    "due_drafts",
     "answer",
     "open_blocking",
     "with_answers",
@@ -305,6 +306,7 @@ def update(conn, task_id, changes: dict) -> dict:
         clean["position"] = _end_position(conn, task["status"], clean["priority"])
     if task["draft_error"] and clean.get("prompt"):
         clean["draft_error"] = None  # written by hand instead
+        clean["draft_retry_at"] = None
     if not clean:
         return task
     clean["updated_at"] = db.now()
@@ -387,6 +389,7 @@ def start_draft(conn, task_id) -> dict:
     if task["status"] != "hold" or not task["draft_error"]:
         raise TaskError("only a task whose draft failed can be drafted again")
     _write(conn, task_id, {"status": "drafting", "draft_error": None,
+                           "draft_retry_at": None,
                            "draft_target": task["draft_target"] or "queued"})
     return get(conn, task_id)
 
@@ -415,16 +418,27 @@ def finish_draft(conn, task_id, result: dict) -> dict | None:
     return get(conn, task_id)
 
 
-def fail_draft(conn, task_id, error: str) -> dict | None:
-    """The draft failed: the task goes on hold with the error."""
+def fail_draft(conn, task_id, error: str, retry_at: float | None = None) -> dict | None:
+    """The draft failed: the task goes on hold with the error. With
+    ``retry_at`` (a usage limit stopped it) it is drafted again by itself then."""
     row = conn.execute("SELECT priority FROM tasks WHERE id = ?", (task_id,)).fetchone()
     if row is None:
         return None
     fields = {"status": "hold", "draft_error": error or "the draft failed",
+              "draft_retry_at": retry_at,
               "position": _end_position(conn, "hold", row["priority"])}
     if not _write(conn, task_id, fields, "AND status = 'drafting'"):
         return None
     return get(conn, task_id)
+
+
+def due_drafts(conn, now: float | None = None) -> list[str]:
+    """The tasks whose failed draft is due to be tried again by itself."""
+    now = db.now() if now is None else now
+    return [r["id"] for r in conn.execute(
+        "SELECT id FROM tasks WHERE status = 'hold' AND draft_error IS NOT NULL "
+        "AND draft_retry_at IS NOT NULL AND draft_retry_at <= ? ORDER BY draft_retry_at",
+        (now,))]
 
 
 def open_blocking(task) -> list[dict]:

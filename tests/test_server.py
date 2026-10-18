@@ -1,3 +1,5 @@
+import time
+
 import pytest
 from starlette.testclient import TestClient
 
@@ -436,6 +438,40 @@ def test_a_failed_draft_holds_the_task_with_the_error(client, repo, fake_claude,
     assert task["draft_error"] is None
     r = post(client, f"/api/tasks/{task_id}/action", {"action": "redraft"})
     assert r.status_code == 400
+
+
+def test_a_draft_stopped_by_a_usage_limit_is_retried_by_itself(client, repo,
+                                                               fake_claude, monkeypatch):
+    monkeypatch.setenv("FAKE_CLAUDE_MODE", "limit")
+    fake_claude()
+    task_id = post(client, "/api/tasks", {"description": "Do it",
+                                          "project_dir": str(repo)}).json()["task"]["id"]
+    task = drafted(client, task_id)
+    assert task["status"] == "hold"
+    assert task["draft_error"] == "Claude failed: You've hit your session limit"
+    assert task["draft_retry_at"] > time.time() + 60
+    # Not before the reset.
+    assert client.service.retry_drafts() == []
+    conn = client.service.conn()
+    assert tasks.due_drafts(conn, task["draft_retry_at"]) == [task_id]
+    conn.execute("UPDATE tasks SET draft_retry_at = 1 WHERE id = ?", (task_id,))
+    monkeypatch.setenv("FAKE_CLAUDE_MODE", "ok")
+    assert client.service.retry_drafts() == [task_id]
+    task = drafted(client, task_id)
+    assert task["status"] == "queued"
+    assert task["draft_error"] is None and task["draft_retry_at"] is None
+    assert client.service.retry_drafts() == []
+
+
+def test_a_draft_written_by_hand_is_not_retried(client, repo, fake_claude, monkeypatch):
+    monkeypatch.setenv("FAKE_CLAUDE_MODE", "limit")
+    fake_claude()
+    task_id = post(client, "/api/tasks", {"description": "Do it",
+                                          "project_dir": str(repo)}).json()["task"]["id"]
+    drafted(client, task_id)
+    r = client.patch(f"/api/tasks/{task_id}", json={"prompt": "## Goal\nDo it by hand."})
+    assert r.json()["task"]["draft_retry_at"] is None
+    assert tasks.due_drafts(client.service.conn(), time.time() + 86400) == []
 
 
 def test_a_failed_draft_can_be_written_by_hand(client, repo, fake_claude, monkeypatch):

@@ -86,6 +86,11 @@ function when(ts) {
   return `${d.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })} ${time}`;
 }
 
+function draftRetryText(task) {
+  // A usage limit stopped the draft: the service tries again after the reset.
+  return `Claude writes it again by itself at ${when(task.draft_retry_at)}.`;
+}
+
 function nowSeconds() {
   // The server's clock, so durations agree with what it records.
   return state ? state.now + (Date.now() - state.receivedAt) / 1000 : Date.now() / 1000;
@@ -230,7 +235,7 @@ function ticket(task) {
     <div class="title">${esc(task.title)}${isNew ? '<span class="new">new</span>' : ""}</div>
     <div class="meta">${meta.join("")}</div>
     ${task.note && task.status !== "done" ? `<div class="note">${esc(task.note)}</div>` : ""}
-    ${task.draft_error ? `<div class="note">${esc(task.draft_error)}</div>` : ""}
+    ${task.draft_error ? `<div class="note">${esc(task.draft_error)}${task.draft_retry_at ? `<br>${esc(draftRetryText(task))}` : ""}</div>` : ""}
     ${moves}
   </article>`;
 }
@@ -491,7 +496,7 @@ function overviewHtml() {
     ${after}
     ${task.note ? `<p class="note-box">${esc(task.note)}</p>` : ""}
     ${task.status === "drafting" ? '<p class="drafting-mark">Claude is writing the prompt from your description. This usually takes 10 to 20 seconds.</p>' : ""}
-    ${task.draft_error ? `<p class="note-box">${esc(task.draft_error)}<br>Retry the draft, or write the prompt yourself.</p>` : ""}
+    ${task.draft_error ? `<p class="note-box">${esc(task.draft_error)}<br>${task.draft_retry_at ? `${esc(draftRetryText(task))} Or retry the draft now, or write the prompt yourself.` : "Retry the draft, or write the prompt yourself."}</p>` : ""}
     <div class="actions-bar">${actions.map(([a, label]) => `<button class="btn small${a === "delete" ? " danger" : ""}" data-action="${a}">${label}</button>`).join("")}</div></section>`);
   if (task.questions && task.questions.length && task.status !== "running") parts.push(questionsHtml(task));
   parts.push(overlapsHtml(task));

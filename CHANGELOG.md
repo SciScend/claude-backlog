@@ -16,6 +16,8 @@ First version.
   effort). Claude's questions come with the assumption the prompt makes;
   only a blocking question holds the task, answers go into the prompt
   without a new call, and a failed draft can be retried or written by hand.
+  A draft stopped by Claude's usage limit is tried again by itself after the
+  reset time in Claude's message.
 - Phone layout with tabs and move buttons; phone access through
   `tailscale serve`, limited to one Tailscale login.
 - Runner: one task at a time through claude-nightshift, each in its own git

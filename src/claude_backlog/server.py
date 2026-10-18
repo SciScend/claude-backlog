@@ -51,6 +51,8 @@ logger = logging.getLogger(__name__)
 
 STATIC = Path(__file__).parent / "static"
 LOG_CHUNK = 200_000
+# How often the service looks for drafts due to be tried again after a usage limit.
+DRAFT_RETRY_CHECK = 30
 UNSAFE = {"POST", "PUT", "PATCH", "DELETE"}
 
 _markdown = MarkdownIt("commonmark", {"html": False, "linkify": False}).enable("table")
@@ -70,6 +72,8 @@ class Service:
         self._conns = []
         self._conns_lock = threading.Lock()
         self._drafts: list[threading.Thread] = []
+        self._closing = threading.Event()
+        self._retries = None
 
     def conn(self):
         """A connection for the calling thread (API calls run in a thread pool)."""
@@ -95,6 +99,31 @@ class Service:
         for row in conn.execute("SELECT id FROM tasks WHERE status = 'drafting'"):
             self.start_draft(row["id"])
 
+    def retry_drafts(self) -> list[str]:
+        """Draft again the tasks whose draft waited for a usage limit to reset."""
+        conn = self.conn()
+        started = []
+        for task_id in tasks.due_drafts(conn):
+            try:
+                tasks.start_draft(conn, task_id)
+            except tasks.TaskError:
+                continue  # changed meanwhile
+            self.start_draft(task_id)
+            started.append(task_id)
+        return started
+
+    def start_draft_retries(self, every=DRAFT_RETRY_CHECK) -> None:
+        """Look for drafts due to be tried again, in the background, until close()."""
+        def loop():
+            while not self._closing.wait(every):
+                try:
+                    self.retry_drafts()
+                except Exception:
+                    logger.exception("could not retry the drafts")
+
+        self._retries = threading.Thread(target=loop, name="draft-retries", daemon=True)
+        self._retries.start()
+
     def wait_drafts(self, timeout=60) -> None:
         with self._conns_lock:
             threads = list(self._drafts)
@@ -111,7 +140,7 @@ class Service:
                                      conf["prompt_template"], conf["draft_model"],
                                      conf["draft_effort"])
             except draft.DraftError as exc:
-                tasks.fail_draft(conn, task_id, str(exc))
+                tasks.fail_draft(conn, task_id, str(exc), exc.retry_at)
             else:
                 tasks.finish_draft(conn, task_id, result)
         except tasks.TaskError:
@@ -123,6 +152,9 @@ class Service:
             conn.close()
 
     def close(self) -> None:
+        self._closing.set()
+        if self._retries:
+            self._retries.join(5)
         with self._conns_lock:
             for conn in self._conns:
                 conn.close()
@@ -804,6 +836,8 @@ def serve(port=None, db_path=None) -> None:
 
     service = Service(db_path=db_path, port=port)
     service.resume_drafts()
+    service.retry_drafts()
+    service.start_draft_retries()
     service.watcher = Watcher(service.runner, db_path)
     service.watcher.start()
     def shutdown():

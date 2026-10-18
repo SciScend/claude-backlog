@@ -11,7 +11,10 @@ import json
 import os
 import shutil
 import subprocess
+import time
 from pathlib import Path
+
+from claude_nightshift.limits import looks_like_limit, parse_renewal_time
 
 from claude_backlog import pack
 
@@ -22,6 +25,11 @@ CLAUDE_ENV = "CLAUDE_BACKLOG_CLAUDE"
 
 TIMEOUT = 180
 MAX_QUESTIONS = 5
+
+# A draft stopped by a usage limit is tried again a minute after the reset
+# time in Claude's message, or after half an hour when it names none.
+RESET_MARGIN = 60
+LIMIT_RETRY = 30 * 60
 
 SCHEMA = {
     "type": "object",
@@ -106,7 +114,25 @@ How to write it:
 
 
 class DraftError(Exception):
-    pass
+    """``retry_at``: when to draft again by itself (after a usage limit), or None."""
+
+    def __init__(self, message: str, retry_at: float | None = None):
+        super().__init__(message)
+        self.retry_at = retry_at
+
+
+def _failed(detail: str) -> DraftError:
+    """The error for Claude's failure, with a retry time when it is a usage limit.
+
+    nightshift knows what Claude's limit messages look like, so it decides.
+    """
+    error = DraftError("Claude failed: " + detail)
+    if looks_like_limit(detail):
+        now = time.time()
+        reset = parse_renewal_time(detail)
+        retry_at = reset.timestamp() + RESET_MARGIN if reset else now + LIMIT_RETRY
+        error.retry_at = max(retry_at, now + RESET_MARGIN)
+    return error
 
 
 def claude_command() -> list[str]:
@@ -174,14 +200,13 @@ def draft(description: str, project_dir: str, template: str, model: str = "",
         data = json.loads(result.stdout)
     except ValueError:
         detail = (result.stderr or result.stdout).strip().splitlines()
-        raise DraftError("Claude failed: " + (detail[-1] if detail else
-                                               f"exit code {result.returncode}")) from None
+        raise _failed(detail[-1] if detail else f"exit code {result.returncode}") from None
     if not isinstance(data, dict):
         data = {}
     out = data.get("structured_output")
     if data.get("is_error") or not isinstance(out, dict) or not out.get("prompt"):
-        raise DraftError("Claude failed: " + str(data.get("result") or data.get("subtype")
-                                                 or "no prompt in the answer"))
+        raise _failed(str(data.get("result") or data.get("subtype")
+                          or "no prompt in the answer"))
     questions = [q for q in map(_question, out.get("questions") or []) if q]
     return {"prompt": out["prompt"].strip() + "\n",
             "title": (out.get("title") or "").strip(),

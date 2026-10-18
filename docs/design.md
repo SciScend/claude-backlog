@@ -192,8 +192,9 @@ task that has not started yet warns when its prompt names files that
 another unmerged task of the same repository changes too (section 6,
 "Tasks on the same project"). While
 Claude writes the prompt the card says "drafting"; when the draft failed
-it shows the error, and when Claude asked questions it shows how many and
-whether one blocks the task.
+it shows the error (and, after a usage limit, when Claude tries again by
+itself), and when Claude asked questions it shows how many and whether
+one blocks the task.
 
 Clicking a card opens a side panel:
 
@@ -356,8 +357,14 @@ said (the queue by default). If the draft fails (Claude not installed,
 not signed in, usage limit, a bad answer), the task goes On hold with the
 error on its card and two ways on: "Retry the draft", or "Write it
 myself", which fills the prompt with the template and the description to
-edit by hand. A task left drafting when the service stopped is drafted
-again when it starts.
+edit by hand. When Claude's usage limit stopped the draft, nobody has to
+come back for it: the service drafts it again by itself a minute after
+the reset time in Claude's message (half an hour later when the message
+names none), and the card says when. Whether a message is a usage limit,
+and its reset time, come from nightshift's limit helpers
+(`claude_nightshift.limits`), so backlog keeps no limit wording of its
+own. A task left drafting when the service stopped is drafted again when
+it starts.
 
 The questions are listed on the card, each with its assumption and an
 answer field. Answering is optional and needs no new call to Claude: the
@@ -371,7 +378,8 @@ card, like any task's.
 
 The draft uses a little of the normal Claude usage; it is something I
 start, so the queue's threshold does not apply. It calls `claude`
-directly, not nightshift: it is one short call with no usage logic. Tasks
+directly, not nightshift: it is one short call with no usage logic beyond
+waiting out a limit that stopped it. Tasks
 added from the command line are not drafted and do not use the template;
 the `/backlog` skill follows it (`claude-backlog template` prints it).
 
@@ -559,6 +567,7 @@ be changed by dragging without rewriting files.
 | `description` | what I asked for in my own words, when Claude wrote the prompt from it |
 | `draft_target` | where a drafting task goes when its prompt is written: `queued` or `hold` |
 | `draft_error` | why the last draft failed, or empty |
+| `draft_retry_at` | when a draft stopped by a usage limit is tried again by itself, or empty |
 | `questions` | Claude's questions from the draft (JSON: question, assumption, blocking, answer) |
 | `priority` | 1 high, 2 normal, 3 low |
 | `position` | order within the priority group (a float, so a drop between two cards only changes the dropped one) |
