@@ -29,6 +29,10 @@ First version.
 - Tasks on the same project: a task can start after another one (it waits,
   then starts from that task's branch); the board checks finished branches
   for merge conflicts with their base branch and with each other.
+- Uncommitted changes when a task is added: the new-task form offers
+  "Commit now" (the changed files, a commit message, your hooks and git
+  identity); the `/backlog` skill offers to commit them first; `add` prints
+  a note.
 - `/backlog` skill for Claude Code, CLI (`add`, `list`, `go`, `stop`,
   `export`, `report`), systemd user service and launcher (`install`).
 - Run report and desktop notification when the queue stops.

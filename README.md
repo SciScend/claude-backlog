@@ -75,7 +75,8 @@ it is done.
 - **`/backlog` in Claude Code.** While you work with Claude and see a long
   job coming, type `/backlog` (optionally with a hint). Claude writes a
   self-contained prompt from the conversation and the code, shows it to you,
-  and adds it after your OK.
+  and adds it after your OK. If the project has uncommitted changes, it
+  lists them and offers to commit them first, with a proposed message.
 - **The board.** Press "New task", pick the project folder (type to search
   your projects, or type a path), say in a few sentences of your own what
   Claude should do, choose a priority, and press **Add**. The task is on
@@ -91,6 +92,10 @@ it is done.
   (for example goals that contradict each other) does it wait on hold for
   your answer. You can read and change the prompt on the card. Or press
   "Write it myself" and fill in the prompt template.
+  If the project has uncommitted changes, the form says so and offers
+  **Commit now**: it lists the changed files and commits them all on the
+  current branch with the message you write (your git identity, your
+  hooks; files in `.gitignore` stay out).
 - **The command line.**
 
   ```bash
@@ -98,6 +103,13 @@ it is done.
   claude-backlog add -C ~/projects/site task.md     # a task file, see below
   echo "..." | claude-backlog add -C ~/projects/site -
   ```
+
+  `add` prints a note when the project has uncommitted changes, and adds
+  the task anyway.
+
+A task starts from the last commit, so uncommitted changes in your
+checkout are not part of it, and merging its branch later can conflict
+with them. Commit them first if the task needs them.
 
 The prompt template asks for what guides on unattended coding agents agree
 on: **Goal** (and why), **Context** (where to start, how to run it),

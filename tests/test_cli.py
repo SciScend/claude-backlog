@@ -125,3 +125,13 @@ def test_template_command(conn, capsys):
     settings.update(conn, {"prompt_template": ""})
     cli.main(["template"])
     assert "No prompt template" in capsys.readouterr().out
+
+
+def test_install_copies_the_skill(tmp_path, monkeypatch):
+    from claude_backlog import install
+
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    install._install_skill()
+    skill = (tmp_path / "home" / ".claude" / "skills" / "backlog" / "SKILL.md").read_text()
+    assert install.SKILL_MARKER in skill
+    assert 'git -C "<project folder>" status --porcelain' in skill

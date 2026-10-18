@@ -19,17 +19,24 @@ next Claude session will know, so it must stand on its own.
 2. **Find the project folder.** Default: the git root of the current
    working directory. Use another folder only if the task is clearly about
    it.
-3. **Collect what the next session needs**, by reading the code (read-only):
+3. **Check for uncommitted changes.** If the project folder is in a git
+   repository, run `git -C "<project folder>" status --porcelain`. The task
+   runs in its own worktree that starts from the last commit, so
+   uncommitted changes are not part of it, and merging the task's branch
+   later can conflict with them. If there are any, keep the list of files
+   for the proposal and think of a short commit message that says what
+   they are (`git -C "<project folder>" diff` helps).
+4. **Collect what the next session needs**, by reading the code (read-only):
    the files and folders involved, how the project is built and tested (the
    exact commands), conventions that matter, and anything decided in this
    conversation that is not written down anywhere.
-4. **Write the prompt**, in the language of the conversation, following the
+5. **Write the prompt**, in the language of the conversation, following the
    user's prompt template: run `claude-backlog template` and keep its
    headings, replacing every line in angle brackets with real content (or
    deleting it where the template says a section is optional). With the
    default template that means:
    - **Goal**: what should be true when it is done, and why it matters;
-   - **Context**: the findings from step 3, with concrete paths, the code
+   - **Context**: the findings from step 4, with concrete paths, the code
      to follow as a pattern, and the exact build, run and test commands;
    - **Constraints**: what must not change and what is out of scope;
    - **Done when**: results someone can observe, each with the exact
@@ -46,12 +53,29 @@ next Claude session will know, so it must stand on its own.
    weakening tests: claude-backlog adds those itself. Keep the prompt
    focused on the task. If `claude-backlog template` prints no template,
    use the headings above.
-5. **Propose it.** Show the title (short, imperative), the priority (high,
+6. **Propose it.** Show the title (short, imperative), the priority (high,
    normal or low; normal unless the user said otherwise), the project folder,
    and the full prompt. Mention a model or effort only if the task needs one
-   that differs from the defaults. Ask for an OK; apply any changes the user
-   asks for.
-6. **Add it** after the OK:
+   that differs from the defaults. If step 3 found uncommitted changes, say
+   so: list the files (the first 20 and how many more), say that they are
+   not part of the task's starting point, and offer to commit them first,
+   with your proposed commit message. Ask for an OK; apply any changes the
+   user asks for.
+7. **Commit the changes first**, only if the user said yes to that, on the
+   branch the repository has checked out and with its hooks running (no
+   `--no-verify`, no other git identity, no push):
+
+   ```bash
+   git -C "<project folder>" add -A
+   git -C "<project folder>" commit -m "<the message the user agreed to>"
+   ```
+
+   `git add -A` takes every change the list showed and leaves out what
+   `.gitignore` lists. If the commit fails (a hook, no git identity), show
+   the error and ask how to go on instead of working around it. If HEAD is
+   detached, do not commit; say so. Never make committing the user's
+   checkout part of the task's prompt: the task works in its own worktree.
+8. **Add it** after the OK:
 
    ```bash
    claude-backlog add -C "<project folder>" -t "<title>" -p <priority> - <<'PROMPT'
@@ -63,7 +87,7 @@ next Claude session will know, so it must stand on its own.
    If the task builds on another task of the same project that is not
    merged yet (see `claude-backlog list -a`), add `--after <its id>`: it
    then waits for that task and starts from its branch.
-7. **Confirm** with the task id that `claude-backlog add` printed, and
+9. **Confirm** with the task id that `claude-backlog add` printed, and
    mention that the board (`claude-backlog open`) shows the queue. The task
    runs when the user presses Run now, or when they are away if that is
    switched on.
