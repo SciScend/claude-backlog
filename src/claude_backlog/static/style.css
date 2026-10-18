@@ -409,7 +409,7 @@ svg.icon {
   transition: background-color 0.15s, outline-color 0.15s;
 }
 body.dragging .list.drop { outline-color: var(--line-strong); }
-.list.drop.over { background: var(--accent-soft); outline-color: var(--accent); }
+body.dragging .list.drop.over, .list.drop.over { background: var(--accent-soft); outline-color: var(--accent); }
 
 /* Empty columns say so, as an empty slot on the board. */
 .list:empty::after {
@@ -432,6 +432,7 @@ body.dragging .list[data-status="hold"]:empty::after { content: "Drag a task her
   border: 1px dashed var(--line-strong);
   border-radius: var(--r2);
 }
+body.dragging .list[data-status="hold"]:empty::after { border-color: transparent; }
 
 .col-queue.is-empty .group { display: none; }
 body.dragging .col-queue.is-empty .group { display: block; }
