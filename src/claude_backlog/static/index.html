@@ -103,6 +103,14 @@
       <datalist id="project-list"></datalist>
       <small id="project-info" class="hint"></small>
     </label>
+    <label>Describe the task in your own words
+      <textarea name="description" rows="3"
+        placeholder="For example: the import page is slow with big files; make it faster without changing the file format."></textarea>
+    </label>
+    <div class="draft-row">
+      <button class="btn" id="draft-button" type="button">Write the prompt with Claude</button>
+      <small class="hint" id="draft-status" aria-live="polite">Claude reads the project and fills in the prompt below. Or write the prompt yourself.</small>
+    </div>
     <label>Prompt
       <textarea name="prompt" rows="16" required
         placeholder="Write it for someone who cannot ask you anything: the goal, the files involved, how to check the result, and when it is done."></textarea>

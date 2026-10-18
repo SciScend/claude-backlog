@@ -547,6 +547,13 @@ async function openNewTask(status) {
   const dialog = $("#new-dialog");
   const form = $("#new-form");
   form.reset();
+  draftState.token += 1;  // a draft still being written belongs to the old form
+  draftState.prompt = "";
+  draftState.title = "";
+  form.description.rows = 3;
+  setDrafting(false);
+  $("#draft-status").textContent = DRAFT_HINT;
+  $("#draft-status").className = "hint";
   form.prompt.value = state.settings.prompt_template ? state.settings.prompt_template + "\n" : "";
   form.status.value = status || "queued";
   $("#new-error").hidden = true;
@@ -573,6 +580,68 @@ function selectHint(field) {
   field.blur();
   field.setSelectionRange(hint.index, hint.index + hint[0].length);
   field.focus();
+}
+
+// --- writing the prompt with Claude ---
+
+const DRAFT_HINT = "Claude reads the project and fills in the prompt below. Or write the prompt yourself.";
+const draftState = { token: 0, prompt: "", title: "", timer: null };
+
+function setDrafting(on) {
+  const button = $("#draft-button");
+  button.disabled = on;
+  button.textContent = on ? "Claude is writing..." : "Write the prompt with Claude";
+  clearInterval(draftState.timer);
+  if (!on) return;
+  const started = Date.now();
+  const status = $("#draft-status");
+  status.className = "hint";
+  const tick = () => {
+    const s = Math.round((Date.now() - started) / 1000);
+    status.textContent = `Claude is reading the project (${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}). This usually takes a minute or two.`;
+  };
+  tick();
+  draftState.timer = setInterval(tick, 1000);
+}
+
+async function writeDraft() {
+  const form = $("#new-form");
+  const status = $("#draft-status");
+  const description = form.description.value.trim();
+  const project = form.project_dir.value.trim();
+  const fail = (message) => { status.textContent = message; status.className = "hint warn"; };
+  if (!project) return fail("Choose the project folder first.");
+  if (!description) return fail("Describe the task first, in a few sentences.");
+  const current = form.prompt.value.trim();
+  const untouched = [(state.settings.prompt_template || "").trim(), draftState.prompt.trim(), ""];
+  if (!untouched.includes(current) && !confirm("Replace the prompt you wrote with Claude's draft?")) return;
+  const token = ++draftState.token;
+  setDrafting(true);
+  try {
+    const result = await api("POST", "/api/draft", { description, project_dir: project });
+    if (token !== draftState.token) return;
+    form.prompt.value = result.prompt;
+    draftState.prompt = result.prompt;
+    const title = form.title.value.trim();
+    if (result.title && (!title || title === draftState.title)) {
+      form.title.value = result.title;
+      draftState.title = result.title;
+    }
+    $("#new-error").hidden = true;
+    const n = result.questions.length;
+    if (n) {
+      form.description.value = `${description}\n\nClaude asks (answer here, then write the prompt again):\n`
+        + result.questions.map((q) => `- ${q}\n  Answer: `).join("\n");
+      form.description.rows = Math.min(14, form.description.value.split("\n").length + 1);
+      status.textContent = `Draft ready. Claude has ${n} ${n === 1 ? "question" : "questions"} in the description above: answer and write the prompt again, or add the task as it is.`;
+    } else {
+      status.textContent = "Draft ready. Read it, change what you like, and add the task.";
+    }
+  } catch (err) {
+    if (token === draftState.token) fail(err.message);
+  } finally {
+    if (token === draftState.token) setDrafting(false);
+  }
 }
 
 // Why the prompt cannot be added yet, or "" when it can.
@@ -627,12 +696,14 @@ function setupNewTask() {
   for (const b of $$("[data-new]")) b.addEventListener("click", () => openNewTask(b.dataset.new));
   const form = $("#new-form");
   form.project_dir.addEventListener("change", checkProject);
+  $("#draft-button").addEventListener("click", writeDraft);
   $("#new-submit").addEventListener("click", async () => {
     if (!form.reportValidity()) return;
     const data = Object.fromEntries(new FormData(form).entries());
     for (const k of Object.keys(data)) if (data[k] === "") delete data[k];
     if (data.max_attempts) data.max_attempts = Number(data.max_attempts);
     if ($("#base-branch-wrap").hidden) delete data.base_branch;
+    delete data.description;
     const problem = templateProblem(data.prompt || "");
     if (problem) {
       const box = $("#new-error");

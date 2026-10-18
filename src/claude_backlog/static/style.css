@@ -466,3 +466,5 @@ details .row { margin-top: 10px; }
   .panel { width: 100%; border-left: 0; }
 }
 #template-reset { justify-self: start; align-self: flex-start; width: auto; }
+.draft-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: -4px; }
+.draft-row .hint { flex: 1 1 220px; }

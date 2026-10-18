@@ -102,3 +102,13 @@ def test_phone_setup_shows_the_enable_link_when_serve_hangs(monkeypatch, capsys)
     out = capsys.readouterr().out
     assert "https://enable" in out
     assert "install --phone' again" in out
+
+
+def test_template_command(conn, capsys):
+    from claude_backlog import settings
+
+    assert cli.main(["template"]) == 0
+    assert capsys.readouterr().out.startswith("## Goal\n<")
+    settings.update(conn, {"prompt_template": ""})
+    cli.main(["template"])
+    assert "No prompt template" in capsys.readouterr().out

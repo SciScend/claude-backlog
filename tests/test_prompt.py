@@ -16,6 +16,9 @@ def test_prompt_in_a_worktree_mentions_the_branch():
     assert "from main at abcdef123456" in text
     assert "Do not commit" not in text
     assert text.endswith("The task:\n\nDo it.\n")
+    assert "every commit leaves the project\n  working" in text
+    assert "Do not delete, skip or weaken tests" in text
+    assert '"Done when" section' in text
 
 
 def test_prompt_without_git_forbids_commits():

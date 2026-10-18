@@ -12,22 +12,22 @@ __all__ = ["DEFAULTS", "PROMPT_TEMPLATE", "get", "get_all", "update"]
 
 PROMPT_TEMPLATE = """\
 ## Goal
-<What should exist or work when this is done, in a sentence or two.>
+<What should be true when this is done, and why it matters.>
 
 ## Context
-<Files, folders, docs and earlier decisions to read first.>
+<Where to start: files, docs, error messages, code to follow as a pattern, how to run it.>
 
-## Steps
-<The order of the work, if it matters. Delete this section if it does not.>
-
-## How to check
-<Commands to run and tests that must pass.>
+## Constraints
+<What must not change and what is out of scope: files, APIs, behavior, new dependencies.>
 
 ## Done when
-<The condition that ends the task.>
+<Observable results, each with the exact command or step that checks it.>
 
-## Do not
-<What to leave alone: files, APIs, dependencies. Delete if nothing.>
+## Milestones
+<For a long task: steps in order, each one checkable on its own. Delete for a short task.>
+
+## When unsure
+<Choices Claude may make alone, choices to leave for you, what to do if blocked.>
 """
 
 DEFAULTS = {

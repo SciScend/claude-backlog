@@ -76,10 +76,13 @@ it is done.
   job coming, type `/backlog` (optionally with a hint). Claude writes a
   self-contained prompt from the conversation and the code, shows it to you,
   and adds it after your OK.
-- **The board.** Press "New task", pick the project folder, fill in the
-  prompt template (Goal, Context, Steps, How to check, Done when, Do not:
-  replace each hint in angle brackets or delete it), choose a priority.
-  The template can be changed in Settings.
+- **The board.** Press "New task" and pick the project folder. Describe
+  the task in a few sentences of your own and press **Write the prompt with
+  Claude**: Claude reads the project (read-only) and writes the full prompt,
+  with real paths and the project's own test commands, in a minute or two.
+  If something important is open it adds questions to your description;
+  answer them and press the button again. Or fill in the prompt template
+  yourself. Then choose a priority and add the task.
 - **The command line.**
 
   ```bash
@@ -88,10 +91,18 @@ it is done.
   echo "..." | claude-backlog add -C ~/projects/site -
   ```
 
+The prompt template asks for what guides on unattended coding agents agree
+on: **Goal** (and why), **Context** (where to start, how to run it),
+**Constraints** (what must not change), **Done when** (observable results,
+each with the command that checks it), **Milestones** for long tasks, and
+**When unsure** (which choices Claude may make alone and which to leave for
+you). You can change it in Settings; `claude-backlog template` prints it.
+
 claude-backlog adds its own rules to every prompt: work without asking,
-keep progress notes in `STATE.md` so the work can be resumed, commit on the
-task's branch only, and finish with a `SUMMARY.md` that lists the decisions
-left for you.
+keep progress notes in `STATE.md` so the work can be resumed, work in small
+checked steps and commit them on the task's branch only, do not weaken
+tests to make them pass, and finish with a `SUMMARY.md` that lists the
+decisions left for you.
 
 ### Order and priority
 
@@ -168,6 +179,8 @@ mind when you write tasks.
 - Each task works in a separate git worktree on its own branch. Claude is
   told not to push, merge or touch anything outside the worktree and its
   task folder, and the branch is only merged when you do it.
+- "Write the prompt with Claude" runs Claude in the project folder with
+  read-only tools (Read, Grep, Glob) and nothing else.
 - The board listens on `127.0.0.1` only and refuses requests from other web
   pages, because anyone who can use it can make Claude run commands.
 - Phone access goes through `tailscale serve` to your own devices, and only
@@ -186,6 +199,7 @@ claude-backlog go [--until HH:MM]    start the queue now
 claude-backlog stop [--now]          stop after the current task, or now
 claude-backlog export ID             print a task as a task file
 claude-backlog report                print the latest run report
+claude-backlog template              print the prompt template
 claude-backlog serve [--port N]      run the service in the foreground
 ```
 

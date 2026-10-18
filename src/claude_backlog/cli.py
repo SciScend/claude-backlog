@@ -75,6 +75,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("export", help="print a task as a task file")
     p.add_argument("task_id")
     sub.add_parser("report", help="print the latest run report")
+    sub.add_parser("template", help="print the prompt template for new tasks")
     return parser
 
 
@@ -172,6 +173,12 @@ def cmd_report(args, conn) -> int:
     return 0
 
 
+def cmd_template(args, conn) -> int:
+    template = settings.get(conn, "prompt_template").strip()
+    print(template or "No prompt template is set (Settings on the board).")
+    return 0
+
+
 def cmd_go(args, conn) -> int:
     result = _api(conn, "POST", "/api/run", {"until": args.until})
     print("Started." if result["started"] else "Already running.")
@@ -216,7 +223,8 @@ def main(argv=None) -> int:
         return install.install(port, phone=args.phone)
     conn = db.connect()
     handlers = {"add": cmd_add, "list": cmd_list, "export": cmd_export,
-                "report": cmd_report, "go": cmd_go, "stop": cmd_stop, "open": cmd_open}
+                "report": cmd_report, "template": cmd_template, "go": cmd_go,
+                "stop": cmd_stop, "open": cmd_open}
     try:
         return handlers[args.command](args, conn)
     except tasks.TaskError as exc:

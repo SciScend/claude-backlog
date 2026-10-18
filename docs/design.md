@@ -205,13 +205,45 @@ the repository has uncommitted changes (they are not part of the task's
 starting point).
 
 The prompt field opens with the prompt template from Settings: a few
-headings (Goal, Context, Steps, How to check, Done when, Do not) with one
-line in angle brackets under each that says what goes there. The form
-refuses to add the task while a line from the template is still there
-unchanged, so every hint is either replaced or deleted, and while nothing
-but the template's headings is left. An empty template gives an empty
-field. Tasks added from the command line or with `/backlog` do not use the
-template.
+headings with one line in angle brackets under each that says what goes
+there. The form refuses to add the task while a line from the template is
+still there unchanged, so every hint is either replaced or deleted, and
+while nothing but the template's headings is left. An empty template gives
+an empty field.
+
+The default template asks for what the guides on unattended coding agents
+agree on (Anthropic's prompting and Claude Code best practices, the
+long-running harness article, OpenAI's Codex best practices and ExecPlans,
+Devin's and GitHub Copilot's task guides):
+
+| Section | Why |
+|---|---|
+| Goal | what should be true, and why: Claude makes better calls when it knows the reason |
+| Context | where to start, and code to follow as a pattern, so the first session is not spent searching |
+| Constraints | what must not change and what is out of scope |
+| Done when | observable results, each with the command that checks it: without a check Claude stops when the work only looks done |
+| Milestones | for long tasks, steps that can each be checked on their own, so work across sessions stays incremental |
+| When unsure | which choices Claude may make alone, which to leave for me, and what to do when something blocks the task |
+
+Rules that hold for every task (no questions, STATE.md, small checked
+steps, not weakening tests, SUMMARY.md) are in the preamble (section 6),
+not in the template.
+
+**Write the prompt with Claude.** Above the prompt, a smaller field takes a
+description in my own words ("the import page is slow with big files; make
+it faster without changing the file format"). "Write the prompt" runs
+`claude -p` in the project folder with read-only tools (Read, Grep, Glob;
+`--permission-mode dontAsk`) and a structured answer: the prompt, written
+to the template from the actual code (real paths, the project's own build
+and test commands), and up to five questions where my description leaves a
+choice open that matters. The draft replaces the prompt field; the
+questions are appended to the description with empty answers, and pressing
+the button again writes a new draft with the answers. This takes a minute
+or two and uses a little of the normal Claude usage; it is something I
+start, so the queue's threshold does not apply. It calls `claude`
+directly, not nightshift: it is one short session with no usage logic.
+Tasks added from the command line do not use the template; the `/backlog`
+skill follows it (`claude-backlog template` prints it).
 
 "Duplicate" on any card fills the form from that task.
 
@@ -489,10 +521,14 @@ lines are left out when the task does not run in a worktree.
 This is an unattended run. Nobody will answer questions or approve anything.
 
 - Do not ask questions and do not wait for input. When something is unclear,
-  make a reasonable decision yourself and write it down in {task-dir}/STATE.md
-  with the reason.
+  make a reasonable decision yourself (following the task's "When unsure"
+  section, if it has one) and write it down in {task-dir}/STATE.md with the
+  reason.
 - Read {task-dir}/STATE.md first if it exists. It records what earlier
   sessions did. Trust it and continue from where it says.
+- The work may take several sessions: your context is compacted when it
+  fills up, and the task is resumed after usage limits. Do not stop early
+  or cut corners to finish within one session.
 - Keep {task-dir}/STATE.md current as you work. If you hit a session or
   usage limit, or are about to, first record the exact progress there: what
   is done, what is half done, and the next step, so the work can be resumed.
@@ -500,16 +536,29 @@ This is an unattended run. Nobody will answer questions or approve anything.
   from {base_branch} at {base_commit}. It is a fresh checkout: install
   dependencies if the task needs them, and expect files that are not in git
   (for example .env) to be missing.
-- Commit your work on {branch} whenever a step is complete, with a clear
-  message. Do not push, do not switch or create branches, do not merge.
+- Work in small steps. After each step, run the relevant checks and commit
+  on {branch} with a clear message, so every commit leaves the project
+  working. Do not push, do not switch or create branches, do not merge.
 - Only change files inside this worktree and {task-dir}. Do not touch
   anything else, including the original project folder {project_dir}.
+- Do only what the task asks: no features, refactoring or configurability
+  it does not ask for.
+- Fix causes, not symptoms. Do not delete, skip or weaken tests or checks
+  to make them pass, do not hard-code results for test inputs, and do not
+  bypass git hooks. If a test or the task itself looks wrong, say so in
+  SUMMARY.md instead of working around it.
+- If something blocks part of the task (a missing credential, a service
+  that is down), do the rest, and record what is blocked and why.
+- Remove temporary files and scripts you made for yourself.
 - Do not end your turn while any agent you started is still running. Wait
   for all of them to finish.
-- When the task is done, write {task-dir}/SUMMARY.md: what was done, checks
-  and their results, problems left open, and a section "Decisions for me".
-  Mark everything done in STATE.md. Write SUMMARY.md only when the task is
-  really finished; it is the signal that the task is complete.
+- Before you finish, check every completion criterion of the task (its
+  "Done when" section, if it has one) and run the checks one last time.
+- When the task is done, write {task-dir}/SUMMARY.md: what was done, the
+  checks you ran and their results, problems left open, and a section
+  "Decisions for me". Mark everything done in STATE.md. Write SUMMARY.md
+  only when the task is really finished; it is the signal that the task is
+  complete.
 
 The task:
 ```
@@ -558,6 +607,7 @@ claude-backlog go [--until HH:MM]    same as Run now
 claude-backlog stop [--now]          stop after the current task, or now
 claude-backlog export ID             write the task as a task file
 claude-backlog report                print the latest run report
+claude-backlog template              print the prompt template (the /backlog skill follows it)
 ```
 
 The CLI talks to the service's API when it is running and to the database

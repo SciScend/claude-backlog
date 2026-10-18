@@ -23,19 +23,29 @@ next Claude session will know, so it must stand on its own.
    the files and folders involved, how the project is built and tested (the
    exact commands), conventions that matter, and anything decided in this
    conversation that is not written down anywhere.
-4. **Write the prompt**, in the language of the conversation. Include:
-   - the goal, in one or two sentences, and why it matters;
-   - the context from step 3, with concrete paths;
-   - the scope: what to change and what to leave alone;
-   - the steps, if the order matters;
-   - how to check the result (commands to run, what must pass);
-   - when the task counts as done;
-   - the decisions the user wants to make themselves, so they are listed in
-     the summary rather than guessed.
+4. **Write the prompt**, in the language of the conversation, following the
+   user's prompt template: run `claude-backlog template` and keep its
+   headings, replacing every line in angle brackets with real content (or
+   deleting it where the template says a section is optional). With the
+   default template that means:
+   - **Goal**: what should be true when it is done, and why it matters;
+   - **Context**: the findings from step 3, with concrete paths, the code
+     to follow as a pattern, and the exact build, run and test commands;
+   - **Constraints**: what must not change and what is out of scope;
+   - **Done when**: results someone can observe, each with the exact
+     command or step that checks it (prefer the project's own tests; ask
+     for a test that fails before the change when that fits);
+   - **Milestones**: for a long task, steps in order that can each be
+     checked on their own;
+   - **When unsure**: which choices Claude may make alone, which the user
+     wants to make (they end up in the summary instead of being guessed),
+     and what to do if something blocks the task.
 
-   Do not add rules about working unattended, STATE.md, SUMMARY.md, git
-   branches or commits: claude-backlog adds those itself. Keep the prompt
-   focused on the task.
+   Use only paths and commands you have seen. Do not add rules about
+   working unattended, STATE.md, SUMMARY.md, git branches, commits or not
+   weakening tests: claude-backlog adds those itself. Keep the prompt
+   focused on the task. If `claude-backlog template` prints no template,
+   use the headings above.
 5. **Propose it.** Show the title (short, imperative), the priority (high,
    normal or low; normal unless the user said otherwise), the project folder,
    and the full prompt. Mention a model or effort only if the task needs one
