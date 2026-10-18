@@ -12,6 +12,9 @@ __all__ = [
     "repo_info",
     "is_dirty",
     "resolve_commit",
+    "is_ancestor",
+    "branch_tips",
+    "merge_conflicts",
     "ensure_worktree",
     "has_identity",
     "identity_env",
@@ -70,6 +73,39 @@ def is_dirty(folder) -> bool:
 
 def resolve_commit(repo_root, ref) -> str:
     return git("rev-parse", "--verify", f"{ref}^{{commit}}", cwd=repo_root)
+
+
+def is_ancestor(repo_root, commit, other) -> bool:
+    """True when ``commit`` is already part of ``other`` (merged into it)."""
+    result = subprocess.run(["git", "merge-base", "--is-ancestor", commit, other],
+                            cwd=repo_root, capture_output=True)
+    return result.returncode == 0
+
+
+def branch_tips(repo_root) -> dict[str, str]:
+    """Every local branch and the commit it points to."""
+    out = git("for-each-ref", "--format=%(refname:short) %(objectname)", "refs/heads",
+              cwd=repo_root, check=False)
+    return dict(line.rsplit(" ", 1) for line in out.splitlines() if " " in line)
+
+
+def merge_conflicts(repo_root, ours, theirs) -> list[str] | None:
+    """The files that would conflict when merging two commits; [] when none.
+
+    Merges in memory with ``git merge-tree --write-tree`` (git 2.38 or later),
+    so no file is touched. None when it cannot tell (an older git, a bad commit).
+    """
+    result = subprocess.run(
+        ["git", "merge-tree", "--write-tree", "--name-only", "--no-messages", ours, theirs],
+        cwd=repo_root, capture_output=True, text=True, errors="replace",
+    )
+    lines = result.stdout.splitlines()
+    if result.returncode == 0:
+        return []
+    if result.returncode == 1 and lines and len(lines[0]) >= 40 and all(
+            c in "0123456789abcdef" for c in lines[0]):
+        return [line for line in lines[1:] if line]
+    return None
 
 
 def branch_exists(repo_root, branch) -> bool:

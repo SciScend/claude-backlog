@@ -30,6 +30,7 @@ from starlette.staticfiles import StaticFiles
 
 from claude_backlog import (
     __version__,
+    conflicts,
     db,
     draft,
     gitops,
@@ -150,6 +151,27 @@ def _card(task) -> dict:
     return card
 
 
+def _cards(conn) -> list[dict]:
+    """All cards, with "start after" and the merge check filled in."""
+    cards = [_card(t) for t in tasks.list_tasks(conn)]
+    by_id = {c["id"]: c for c in cards}
+    for card in cards:
+        card["after_title"] = None
+        card["waiting"] = False
+        if not card["after_task"]:
+            continue
+        before = by_id.get(card["after_task"])
+        if before is None:  # archived
+            with contextlib.suppress(tasks.TaskError):
+                before = tasks.get(conn, card["after_task"])
+        if before is not None:
+            card["after_title"] = before["title"]
+            card["waiting"] = (before["status"] not in tasks.FINISHED
+                               and card["status"] in ("queued", "hold"))
+    conflicts.annotate(cards)
+    return cards
+
+
 def _gsetting(schema, key):
     if not shutil.which("gsettings"):
         return None
@@ -205,7 +227,7 @@ def _state(svc: Service) -> dict:
     return {
         "version": __version__,
         "revision": db.revision(conn),
-        "tasks": [_card(t) for t in tasks.list_tasks(conn)],
+        "tasks": _cards(conn),
         "runner": svc.runner.status(),
         "usage": svc.usage.get(),
         "presence": svc.watcher.status() if svc.watcher else None,
@@ -218,7 +240,10 @@ def _state(svc: Service) -> dict:
 
 def _detail(svc: Service, task_id) -> dict:
     conn = svc.conn()
-    task = _card(tasks.get(conn, task_id))
+    task = next((c for c in _cards(conn) if c["id"] == task_id), None)
+    if task is None:  # archived
+        task = _card(tasks.get(conn, task_id))
+        task.update(after_title=None, waiting=False, merged=False, conflicts=[])
     summary = _read(_summary_path(task_id))
     runs = [dict(r) for r in conn.execute(
         "SELECT * FROM runs WHERE task_id = ? ORDER BY started_at DESC", (task_id,))]
@@ -272,7 +297,7 @@ def get_state(request, _):
 def create_task(request, data):
     svc = _svc(request)
     allowed = {"prompt", "project_dir", "title", "priority", "status", "model", "effort",
-               "max_windows", "threshold", "max_attempts", "base_branch"}
+               "max_windows", "threshold", "max_attempts", "base_branch", "after_task"}
     task = tasks.create(svc.conn(), **{k: v for k, v in data.items() if k in allowed})
     return {"task": task}
 
@@ -469,6 +494,7 @@ def project_info(request, _):
     return {
         "exists": True,
         "git": bool(info),
+        "root": info.root if info else str(path.resolve()),
         "branch": info.branch if info else None,
         "branches": branches,
         "dirty": gitops.is_dirty(path) if info else False,

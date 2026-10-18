@@ -158,6 +158,21 @@ when the queue stops.
 A folder that is not a git repository works too: the task then runs in the
 folder itself, without a branch.
 
+### Several tasks on the same project
+
+Each task's branch starts from the base branch as it is when the task
+starts, so two tasks on the same project do not see each other's work
+unless you merged the first one in between. That keeps every branch
+independent: you can merge or drop each one on its own.
+
+- When a task builds on another one, set **Start from** to "after" that
+  task (or `add --after ID`). It waits in the queue until the other task is
+  done, then starts from that task's branch, so merging it brings in both.
+- The board checks every finished, unmerged branch against its base branch
+  and against the other finished branches of the same repository (with
+  `git merge-tree`, which touches no files; git 2.38 or later). A card that
+  would conflict says so, and the task panel lists the files.
+
 ### From your phone
 
 1. Install Tailscale on the computer and the phone, logged in to the same
@@ -194,7 +209,7 @@ mind when you write tasks.
 claude-backlog install [--phone]     install the service, the /backlog skill and a launcher
 claude-backlog uninstall             remove them (your tasks stay)
 claude-backlog open                  open the board in the browser
-claude-backlog add [-C DIR] [-p high|normal|low] [-t TITLE] [--hold] PROMPT | FILE | -
+claude-backlog add [-C DIR] [-p high|normal|low] [-t TITLE] [--hold] [--after ID] PROMPT | FILE | -
 claude-backlog list [-a]             the queue, what runs, what needs attention
 claude-backlog go [--until HH:MM]    start the queue now
 claude-backlog stop [--now]          stop after the current task, or now
@@ -221,7 +236,7 @@ Migrate every call in src/api/ from the v1 client to the v2 client. ...
 ```
 
 Optional fields: `status: hold`, `threshold`, `max-attempts`,
-`base-branch`. Without `project`, `add` uses the git root of the file's
+`base-branch`, `after` (the id of a task to start after). Without `project`, `add` uses the git root of the file's
 folder.
 
 ## Where things are

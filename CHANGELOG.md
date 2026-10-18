@@ -20,6 +20,9 @@ First version.
   (Cinnamon, GNOME, freedesktop screensavers, logind fallback); stops when you
   come back.
 - Weekly limit setting (default 50%) passed to nightshift.
+- Tasks on the same project: a task can start after another one (it waits,
+  then starts from that task's branch); the board checks finished branches
+  for merge conflicts with their base branch and with each other.
 - `/backlog` skill for Claude Code, CLI (`add`, `list`, `go`, `stop`,
   `export`, `report`), systemd user service and launcher (`install`).
 - Run report and desktop notification when the queue stops.

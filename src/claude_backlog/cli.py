@@ -56,6 +56,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-t", "--title", default=None)
     p.add_argument("-p", "--priority", choices=["high", "normal", "low"], default=None)
     p.add_argument("--hold", action="store_true", help="put it on hold, not in the queue")
+    p.add_argument("--after", metavar="ID", default=None,
+                   help="start after this task of the same repository is done")
     p.add_argument("-m", "--model", default=None)
     p.add_argument("-e", "--effort", default=None,
                    choices=["low", "medium", "high", "xhigh", "max"])
@@ -131,11 +133,15 @@ def cmd_add(args, conn) -> int:
             kwargs[key] = value
     if args.hold:
         kwargs["status"] = "hold"
+    if args.after:
+        kwargs["after_task"] = args.after
     task = tasks.create(conn, **kwargs)
     where = "on hold" if task["status"] == "hold" else f"queued, {task['priority_name']}"
     print(f"Added {task['id']}: {task['title']} ({where})")
     print(f"  project: {task['project_dir']}"
           + ("" if task["in_git"] else "  (not a git repository: runs in place)"))
+    if task["after_task"]:
+        print(f"  starts after: {task['after_task']}")
     return 0
 
 

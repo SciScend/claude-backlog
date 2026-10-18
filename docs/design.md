@@ -176,14 +176,19 @@ prompt).
 ### Task card and detail panel
 
 The card shows the title, the project (folder name), priority, model and
-effort when they differ from the defaults, and attempts so far.
+effort when they differ from the defaults, and attempts so far. A task that
+starts after another one says so ("waits for ..." until that task is
+done). A finished task's card says when its branch is already merged, and
+warns when it would conflict with its base branch or with another
+finished task's branch (section 6, "Tasks on the same project").
 
 Clicking a card opens a side panel:
 
 - the prompt and all settings, editable while the task is not running;
 - `SUMMARY.md` rendered, when there is one;
 - the branch: name, base commit, list of commits, changed files with a
-  diff view;
+  diff view, and the merge check (which branches it conflicts with, and in
+  which files);
 - the runs: start, end, result, nightshift exit code, link to the log;
 - the full log of the running attempt, live;
 - buttons: Run next, Hold, Retry, Archive, Delete, Open worktree folder,
@@ -226,7 +231,7 @@ of the task's starting point).
 | Title | Claude's title, or the first line of the prompt | headings that come from the prompt template are skipped |
 | Priority | Normal | High / Normal / Low |
 | Put in | Queue | Queue or On hold |
-| Base branch | the project's current branch | the task's branch starts from its latest commit |
+| Start from | the project's current branch | a branch (the task's branch starts from its latest commit), or "after" another task of the same repository (section 6, "Tasks on the same project") |
 | Model, effort | from Settings | folded away; the model is chosen from a list: Opus, Sonnet, Haiku, Fable (the aliases `claude --model` takes, each the latest version; Fable notes that some plans need usage credits for it), or Other for a full model name |
 | Windows per attempt | from Settings (2) | folded away; how many 5-hour windows one attempt may use (nightshift `-w`) |
 | Attempts | 3 | folded away; how many times a deferred task is retried before it needs attention |
@@ -446,6 +451,7 @@ be changed by dragging without rewriting files.
 | `title`, `prompt` | |
 | `project_dir` | absolute path of the project as I chose it |
 | `repo_root`, `base_branch`, `base_commit` | empty when the project is not a git repository; `base_commit` is fixed at the first attempt |
+| `after_task` | the task this one starts after, or empty (section 6, "Tasks on the same project"); fixed at the first attempt |
 | `branch`, `worktree` | `backlog/<id>` and `~/.local/share/claude-backlog/worktrees/<id>`, once created |
 | `status` | `hold`, `queued`, `running`, `done`, `attention`, `archived` |
 | `priority` | 1 high, 2 normal, 3 low |
@@ -479,6 +485,7 @@ priority: high
 model: opus
 effort: high
 max-windows: 2
+after: api-client-tests-16
 ---
 Migrate every call in src/api/ from the v1 client to the v2 client. ...
 ```
@@ -488,10 +495,12 @@ one. The database is the only source of truth; files are not watched.
 
 ## 6. Running a task
 
-1. Take the first queued task, mark it `running`, add a `runs` row.
+1. Take the first queued task that does not wait for another task, mark
+   it `running`, add a `runs` row.
 2. Prepare where it runs:
    - **Git repository, first attempt**: record the base commit (the latest
-     commit of the base branch) and run
+     commit of the base branch, or of the branch of the task it starts
+     after, see below) and run
      `git -C <repo_root> worktree add -b backlog/<id> ~/.local/share/claude-backlog/worktrees/<id> <base_commit>`.
      If the project folder is a subfolder of the repository, Claude works
      in the same subfolder of the worktree.
@@ -536,6 +545,38 @@ exits 130.
 After the attempt, backlog commits anything Claude left uncommitted in the
 worktree as one commit "backlog: work in progress (attempt N)", so nothing
 is lost and the branch always shows the full state.
+
+### Tasks on the same project
+
+Tasks run one at a time, but each starts from the base branch as it is
+when the task starts. Two tasks on the same project therefore do not see
+each other's work unless the first one has been merged by then, and their
+branches can conflict when both are merged. Three rules handle that:
+
+1. **Independent by default.** Each task's branch starts from its base
+   branch, so every branch can be reviewed, merged or thrown away on its
+   own. Tasks that touch different parts of a project merge cleanly.
+2. **"Start after" for tasks that build on each other.** A task can be set
+   to start after another task of the same repository (the form's "Start
+   from" list, the edit tab, `add --after ID`, `after:` in a task file).
+   It stays in the queue, marked "waits for ...", and the runner skips it
+   until that task is done (or archived after it was done). Its first
+   attempt then starts from the other task's branch, so its own branch
+   contains both; merging it brings in both. If that branch is already
+   merged into the base branch, or was deleted, it starts from the base
+   branch as usual. Deleting a task clears "start after" on the tasks that
+   waited for it. Chains are allowed; a task cannot wait for itself, for a
+   task of another repository, or in a circle.
+3. **Merge check, with no model.** For every finished task whose branch is
+   not merged yet, the board checks whether merging it would conflict with
+   its base branch, and with the branches of the other finished tasks of
+   the same repository: `git merge-tree --write-tree` (git 2.38 or later)
+   merges in memory and touches no files. Results are cached by the
+   commits involved, so they are only computed again when a branch moves.
+   The card warns ("conflicts with main", "conflicts with <task>") and the
+   detail panel lists the files. With an older git, the check is left out.
+   A conflict is resolved by merging one branch, then the other by hand,
+   or with a new task that merges it and resolves the conflicts.
 
 ### After a task
 
@@ -637,7 +678,7 @@ claude-backlog install [--phone] | uninstall
                                      systemd user unit, /backlog skill, desktop launcher;
                                      --phone also sets up tailscale serve
 claude-backlog open                  open the board in the browser
-claude-backlog add [-C DIR] [-p high|normal|low] [--hold] PROMPT | FILE | -
+claude-backlog add [-C DIR] [-p high|normal|low] [--hold] [--after ID] PROMPT | FILE | -
 claude-backlog list                  the queue in run order, plus running and attention
 claude-backlog go [--until HH:MM]    same as Run now
 claude-backlog stop [--now]          stop after the current task, or now
@@ -724,7 +765,8 @@ by others.
 - Starting the queue at set times (timers, run windows).
 - Running tasks in parallel, or on more than one machine.
 - Usage or budget logic of its own (nightshift's job).
-- Dependencies between tasks.
+- Dependencies between tasks beyond "start after one other task"
+  (section 6, "Tasks on the same project").
 - Pushing, opening pull requests, merging automatically.
 - macOS and Windows in the first version. The platform-specific parts
   (service, keeping awake, away detection) sit behind three small
@@ -745,3 +787,6 @@ Decided in review (2026-10-18):
    The git identity for this folder follows from that.
 5. **Name**: `claude-backlog`. It says plainly what the tool is. The
    README says it is unofficial and not affiliated with Anthropic.
+6. **Tasks on the same project**: independent branches by default, "start
+   after" for tasks that build on each other, and a merge check on the
+   board; backlog still never merges on its own (section 6).

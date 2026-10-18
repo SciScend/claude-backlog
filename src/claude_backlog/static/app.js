@@ -165,11 +165,15 @@ function ticket(task) {
   if (task.effort) meta.push(`<span>effort ${esc(task.effort)}</span>`);
   if (!task.in_git) meta.push("<span>runs in place, no branch</span>");
   if (task.attempts && task.status !== "done") meta.push(`<span>attempt ${task.attempts}</span>`);
+  if (task.waiting) meta.push(`<span class="warn">waits for ${esc(task.after_title)}</span>`);
+  else if (task.after_title && !task.attempts) meta.push(`<span>after ${esc(task.after_title)}</span>`);
   if (task.status === "done") {
     meta.push(`<span>done ${when(task.finished_at)}</span>`);
     if (task.commits) meta.push(`<span>${task.commits} commit${task.commits === 1 ? "" : "s"}</span>`);
     if (task.decisions) meta.push(`<span>${task.decisions} decision${task.decisions === 1 ? "" : "s"} for you</span>`);
   }
+  if (task.merged) meta.push("<span>merged</span>");
+  for (const c of task.conflicts || []) meta.push(`<span class="warn">conflicts with ${esc(c.with)}</span>`);
   const movable = task.status === "queued" || task.status === "hold";
   let moves = "";
   if (task.status === "queued") {
@@ -426,7 +430,11 @@ function overviewHtml() {
   if (task.status !== "running" && task.status !== "archived") actions.push(["archive", "Archive"]);
   if (task.status !== "running") actions.push(["delete", "Delete"]);
   const parts = [];
+  const after = task.after_title
+    ? `<p>${task.waiting ? "Waits for" : "Starts after"} "${esc(task.after_title)}"${task.attempts ? "" : ": its branch starts from that task's branch, unless that one is merged already"}.</p>`
+    : "";
   parts.push(`<section><p>${STATUS_NAMES[task.status]}, ${esc(task.priority_name)} priority. Project <span class="mono">${esc(task.project_dir)}</span>.</p>
+    ${after}
     ${task.note ? `<p class="note-box">${esc(task.note)}</p>` : ""}
     <div class="actions-bar">${actions.map(([a, label]) => `<button class="btn small${a === "delete" ? " danger" : ""}" data-action="${a}">${label}</button>`).join("")}</div></section>`);
   if (detail.summary_html) parts.push(`<section><h3>What Claude reports (SUMMARY.md)</h3><div class="summary">${detail.summary_html}</div></section>`);
@@ -435,8 +443,14 @@ function overviewHtml() {
       <p><span class="mono">${esc(task.branch)}</span>, from ${esc(task.base_branch || "")} at <span class="mono">${esc((task.base_commit || "").slice(0, 10))}</span>. ${commits.length} commit${commits.length === 1 ? "" : "s"}.</p>
       ${task.worktree ? `<p>Worktree: <span class="mono">${esc(task.worktree)}</span></p>` : ""}
       ${detail.merge_command ? `<div class="copy"><code>${esc(detail.merge_command)}</code><button class="btn small" data-copy="${esc(detail.merge_command)}">Copy</button></div>` : ""}
+      ${task.merged ? `<p>Merged into ${esc(task.base_branch || "the base branch")}.</p>` : ""}
       ${task.status !== "running" && task.status !== "queued" ? '<p><button class="btn small danger" data-action="delete-branch">Delete the branch</button></p>' : ""}
     </section>`);
+    if (task.conflicts && task.conflicts.length) {
+      parts.push(`<section><h3>Merge check</h3>
+        ${task.conflicts.map((c) => `<p class="note-box">Conflicts with ${c.task_id ? "the branch of " : ""}"${esc(c.with)}" in ${c.files.map((f) => `<span class="mono">${esc(f)}</span>`).join(", ")}.</p>`).join("")}
+        <p class="hint">Merge one branch first; the other then needs its conflicts resolved, by hand or with a new task that merges it and resolves them.</p></section>`);
+    }
   } else if (!task.in_git) {
     parts.push("<section><p class=\"hint\">This folder is not a git repository, so the task runs in the folder itself, without a branch.</p></section>");
   }
@@ -462,6 +476,10 @@ function editHtml() {
     <label>Prompt <textarea name="prompt" rows="16" ${locked ? "disabled" : ""}>${esc(t.prompt)}</textarea></label>
     <label>Project folder <input name="project_dir" value="${esc(t.project_dir)}" ${locked || fixed ? "disabled" : ""}>
       ${fixed ? '<small class="hint">Fixed once the task has run, because its branch depends on it.</small>' : ""}</label>
+    <label>Start after <select name="after_task" ${locked || fixed ? "disabled" : ""}>
+      ${opt("", t.in_git ? `No, start from ${esc(t.base_branch || "the current branch")}` : "No", t.after_task)}
+      ${afterChoices(t.repo_root || t.project_dir, t.id, t.after_task).map((o) => opt(esc(o.id), esc(o.label), t.after_task)).join("")}
+    </select></label>
     <div class="row">
       <label>Priority <select name="priority" ${locked ? "disabled" : ""}>${opt("1", "High", t.priority)}${opt("2", "Normal", t.priority)}${opt("3", "Low", t.priority)}</select></label>
       <label>Model <input name="model" value="${esc(t.model || "")}" placeholder="Default" ${locked ? "disabled" : ""}></label>
@@ -473,6 +491,16 @@ function editHtml() {
     <p class="form-error" id="edit-error" hidden></p>
     <div class="actions"><button class="btn primary" type="submit" ${locked ? "disabled" : ""}>Save changes</button></div>
   </form>`;
+}
+
+// The tasks of the same repository (or folder) a task can start after.
+function afterChoices(root, exceptId, current) {
+  const sameRepo = (t) => (t.repo_root || t.project_dir) === root;
+  const list = state.tasks.filter((t) => t.id !== exceptId && sameRepo(t));
+  const names = { hold: "on hold", queued: "queued", running: "running", done: "done", attention: "needs attention" };
+  const choices = list.map((t) => ({ id: t.id, label: `${t.title} (${names[t.status] || t.status})` }));
+  if (current && !choices.some((c) => c.id === current)) choices.push({ id: current, label: current });
+  return choices;
 }
 
 async function renderLog(body) {
@@ -838,8 +866,10 @@ async function checkProject() {
       return true;
     }
     const select = $("#base-branch");
-    select.innerHTML = data.branches.map((b) => `<option${b === data.branch ? " selected" : ""}>${esc(b)}</option>`).join("");
-    wrap.hidden = !data.branches.length;
+    const after = afterChoices(data.root, null, null);
+    select.innerHTML = `<optgroup label="Branch">${data.branches.map((b) => `<option value="${esc(b)}"${b === data.branch ? " selected" : ""}>${esc(b)}</option>`).join("")}</optgroup>`
+      + (after.length ? `<optgroup label="After a task (its branch, once it is done)">${after.map((o) => `<option value="after:${esc(o.id)}">${esc(o.label)}</option>`).join("")}</optgroup>` : "");
+    wrap.hidden = !data.branches.length && !after.length;
     info.textContent = `Git repository. The task gets its own branch, starting from ${data.branch || "the current commit"}.`;
     if (data.dirty) {
       info.textContent += " It has uncommitted changes; they are not part of the task's starting point.";
@@ -1006,6 +1036,10 @@ async function addTask() {
   for (const k of Object.keys(data)) if (data[k] === "") delete data[k];
   if (data.max_attempts) data.max_attempts = Number(data.max_attempts);
   if ($("#base-branch-wrap").hidden) delete data.base_branch;
+  if ((data.base_branch || "").startsWith("after:")) {
+    data.after_task = data.base_branch.slice("after:".length);
+    delete data.base_branch;
+  }
   delete data.description;
   const problem = templateProblem(data.prompt || "");
   if (problem) {

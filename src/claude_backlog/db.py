@@ -16,7 +16,7 @@ from claude_backlog import paths
 
 __all__ = ["SCHEMA_VERSION", "connect", "transaction", "revision", "now"]
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 MIGRATIONS = {
     1: """
@@ -72,6 +72,10 @@ MIGRATIONS = {
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
     );
+    """,
+    # A task can start after another task (section 6 of the design).
+    2: """
+    ALTER TABLE tasks ADD COLUMN after_task TEXT;
     """,
 }
 

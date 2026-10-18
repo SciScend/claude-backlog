@@ -289,6 +289,7 @@ body.dragging .col-queue.is-empty .empty { display: none; }
   color: var(--muted);
 }
 .ticket .note { margin-top: 6px; font-size: 0.85rem; color: var(--alert); }
+.ticket .meta .warn { color: var(--alert); font-weight: 600; }
 .ticket .new {
   display: inline-block;
   margin-left: 6px;

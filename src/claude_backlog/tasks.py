@@ -18,7 +18,9 @@ __all__ = [
     "get",
     "list_tasks",
     "queue",
+    "runnable",
     "next_queued",
+    "waits_for",
     "update",
     "move",
     "set_status",
@@ -34,9 +36,11 @@ PRIORITY_NAMES = {v: k for k, v in PRIORITIES.items()}
 
 # Fields that can be changed while a task is not running.
 EDITABLE = {"title", "prompt", "priority", "model", "effort", "max_windows",
-            "threshold", "max_attempts", "project_dir", "base_branch"}
+            "threshold", "max_attempts", "project_dir", "base_branch", "after_task"}
 # Fields fixed once the task has started, because its branch depends on them.
-FIXED_AFTER_START = {"project_dir", "base_branch"}
+FIXED_AFTER_START = {"project_dir", "base_branch", "after_task"}
+# A task that starts after another one may start once that one is in here.
+FINISHED = ("done", "archived")
 
 _CYRILLIC = dict(zip(
     "абвгдежзийклмнопрстуфхцчшщъьюяыэё",
@@ -109,9 +113,53 @@ def queue(conn) -> list[dict]:
     return [to_dict(r) for r in rows]
 
 
+def waits_for(conn, task) -> dict | None:
+    """The unfinished task that ``task`` starts after, or None if it may start."""
+    if not task.get("after_task"):
+        return None
+    row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task["after_task"],)).fetchone()
+    if row is None or row["status"] in FINISHED:
+        return None
+    return to_dict(row)
+
+
+def runnable(conn) -> list[dict]:
+    """The queue without the tasks that wait for another task."""
+    return [t for t in queue(conn) if waits_for(conn, t) is None]
+
+
 def next_queued(conn) -> dict | None:
-    q = queue(conn)
+    q = runnable(conn)
     return q[0] if q else None
+
+
+def _clean_after(conn, after_id, task_id, repo_root, project_dir):
+    """Check the task to start after: it exists, is in the same repository
+    (or folder) and does not lead back to this task."""
+    if not after_id:
+        return None
+    after_id = str(after_id).strip()
+    if after_id == task_id:
+        raise TaskError("a task cannot start after itself")
+    row = conn.execute("SELECT * FROM tasks WHERE id = ?", (after_id,)).fetchone()
+    if row is None:
+        raise TaskError(f"no task {after_id!r} to start after")
+    same = (row["repo_root"] == repo_root) if repo_root else (
+        not row["repo_root"] and row["project_dir"] == project_dir)
+    if not same:
+        raise TaskError("a task can only start after a task of the same repository")
+    seen = {after_id}
+    while row["after_task"]:
+        if row["after_task"] == task_id:
+            raise TaskError("these tasks would wait for each other")
+        if row["after_task"] in seen:
+            break
+        seen.add(row["after_task"])
+        row = conn.execute("SELECT * FROM tasks WHERE id = ?",
+                           (row["after_task"],)).fetchone()
+        if row is None:
+            break
+    return after_id
 
 
 def _end_position(conn, status, priority) -> float:
@@ -145,7 +193,7 @@ def _title_from_prompt(prompt: str, skip=frozenset()) -> str:
 
 def create(conn, prompt, project_dir, title=None, priority="normal", status="queued",
            model=None, effort=None, max_windows=None, threshold=None,
-           max_attempts=None, base_branch=None) -> dict:
+           max_attempts=None, base_branch=None, after_task=None) -> dict:
     prompt = (prompt or "").strip()
     if not prompt:
         raise TaskError("the prompt is empty")
@@ -160,17 +208,19 @@ def create(conn, prompt, project_dir, title=None, priority="normal", status="que
     info = gitops.repo_info(project)
     if info and base_branch is None:
         base_branch = info.branch or "HEAD"
+    after_task = _clean_after(conn, after_task, None, info.root if info else None,
+                              str(project))
     now = db.now()
     with db.transaction(conn):
         task_id = _new_id(conn, title)
         conn.execute(
             """INSERT INTO tasks (id, title, prompt, project_dir, repo_root, subdir,
-                   base_branch, status, priority, position, model, effort,
+                   base_branch, after_task, status, priority, position, model, effort,
                    max_windows, threshold, max_attempts, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (task_id, title, prompt, str(project),
              info.root if info else None, info.subdir if info else None,
-             base_branch if info else None, status, prio,
+             base_branch if info else None, after_task, status, prio,
              _end_position(conn, status, prio), model or None, effort or None,
              _clean_max_windows(max_windows), threshold, max_attempts, now, now),
         )
@@ -185,9 +235,11 @@ def update(conn, task_id, changes: dict) -> dict:
     if task["status"] == "running":
         raise TaskError("the task is running; stop it before editing")
     if task["attempts"] and FIXED_AFTER_START & set(changes):
-        changed = {k for k in FIXED_AFTER_START & set(changes) if changes[k] != task[k]}
+        changed = {k for k in FIXED_AFTER_START & set(changes)
+                   if (changes[k] or None) != task[k]}
         if changed:
-            raise TaskError("the project and base branch are fixed once a task has run")
+            raise TaskError("the project, base branch and 'start after' are fixed once "
+                            "a task has run")
     clean = {}
     for key, value in changes.items():
         if key == "priority":
@@ -214,9 +266,16 @@ def update(conn, task_id, changes: dict) -> dict:
                 raise TaskError("threshold must be between 1 and 100")
         elif key == "max_attempts":
             value = None if value in (None, "") else int(value)
+        elif key == "after_task":
+            continue  # checked below, once the project is known
         elif value == "":
             value = None
         clean[key] = value
+    if "after_task" in changes or ("project_dir" in clean and task["after_task"]):
+        clean["after_task"] = _clean_after(
+            conn, changes.get("after_task", task["after_task"]), task_id,
+            clean.get("repo_root", task["repo_root"]),
+            clean.get("project_dir", task["project_dir"]))
     if "priority" in clean and clean["priority"] != task["priority"]:
         clean["position"] = _end_position(conn, task["status"], clean["priority"])
     if not clean:
@@ -287,13 +346,16 @@ def delete(conn, task_id) -> None:
     if task["status"] == "running":
         raise TaskError("the task is running; stop it first")
     with db.transaction(conn):
+        # Tasks that waited for this one start from their base branch instead.
+        conn.execute("UPDATE tasks SET after_task = NULL WHERE after_task = ?",
+                     (task_id,))
         conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
 
 
 # --- task files ---------------------------------------------------------------
 
 FILE_FIELDS = ("title", "project", "priority", "status", "model", "effort",
-               "max-windows", "threshold", "max-attempts", "base-branch")
+               "max-windows", "threshold", "max-attempts", "base-branch", "after")
 
 
 def parse_task_file(text: str, default_project=None) -> dict:
@@ -330,7 +392,8 @@ def parse_task_file(text: str, default_project=None) -> dict:
     if meta.get("status") == "hold":
         kwargs["status"] = "hold"
     for src, dst in (("model", "model"), ("effort", "effort"),
-                     ("max-windows", "max_windows"), ("base-branch", "base_branch")):
+                     ("max-windows", "max_windows"), ("base-branch", "base_branch"),
+                     ("after", "after_task")):
         if meta.get(src):
             kwargs[dst] = meta[src]
     if meta.get("threshold"):
@@ -351,7 +414,8 @@ def format_task_file(task: dict) -> str:
         lines.append("status: hold")
     for key, field in (("model", "model"), ("effort", "effort"),
                        ("max-windows", "max_windows"), ("threshold", "threshold"),
-                       ("max-attempts", "max_attempts"), ("base-branch", "base_branch")):
+                       ("max-attempts", "max_attempts"), ("base-branch", "base_branch"),
+                       ("after", "after_task")):
         if task.get(field) not in (None, ""):
             lines.append(f"{key}: {task[field]}")
     lines += ["---", task["prompt"], ""]

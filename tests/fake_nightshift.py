@@ -32,8 +32,9 @@ def main():
     log.write_text("".join(f"2026-10-18 02:{i:02d}:00 - INFO - step {i} of the fake run\n"
                            for i in range(12)))
     if step.get("commit"):
-        Path("work.txt").write_text(f"work at {time.time()}\n")
-        subprocess.run(["git", "add", "work.txt"], check=True)
+        name = step.get("file", "work.txt")
+        Path(name).write_text(step.get("text", f"work at {time.time()}\n"))
+        subprocess.run(["git", "add", name], check=True)
         subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit",
                         "-q", "-m", "fake work"], check=True)
     if step.get("dirty"):

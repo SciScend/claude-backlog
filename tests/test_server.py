@@ -166,8 +166,8 @@ def test_phone_port_needs_the_right_tailscale_login(backlog_home):
 
 def test_project_info(client, repo, plain_dir):
     info = client.get("/api/project-info", params={"path": str(repo)}).json()
-    assert info == {"exists": True, "git": True, "branch": "main", "branches": ["main"],
-                    "dirty": False}
+    assert info == {"exists": True, "git": True, "root": str(repo), "branch": "main",
+                    "branches": ["main"], "dirty": False}
     info = client.get("/api/project-info", params={"path": str(plain_dir)}).json()
     assert info["git"] is False
     assert client.get("/api/project-info", params={"path": "/no/such"}).json() == {

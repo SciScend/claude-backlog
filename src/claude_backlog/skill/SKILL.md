@@ -60,6 +60,9 @@ next Claude session will know, so it must stand on its own.
    ```
 
    Add `--hold` if the user wants it on hold rather than in the queue.
+   If the task builds on another task of the same project that is not
+   merged yet (see `claude-backlog list -a`), add `--after <its id>`: it
+   then waits for that task and starts from its branch.
 7. **Confirm** with the task id that `claude-backlog add` printed, and
    mention that the board (`claude-backlog open`) shows the queue. The task
    runs when the user presses Run now, or when they are away if that is

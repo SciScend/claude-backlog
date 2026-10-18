@@ -231,7 +231,8 @@ class Runner:
                     break
                 task = self._pick(conn, tried)
                 if task is None:
-                    reason = "the queue is empty"
+                    reason = ("the queue is empty" if not tasks.queue(conn) else
+                              "the tasks left in the queue wait for other tasks")
                     break
                 tried.add(task["id"])
                 attempt = self._run_task(conn, task)
@@ -277,7 +278,7 @@ class Runner:
         without this it would run again at once and other tasks would wait.
         When every queued task has had its turn, a new round begins.
         """
-        queued = tasks.queue(conn)
+        queued = tasks.runnable(conn)
         if not queued:
             return None
         for task in queued:
@@ -388,8 +389,7 @@ class Runner:
         fields = {}
         base_commit = task["base_commit"]
         if not base_commit:
-            base_commit = gitops.resolve_commit(task["repo_root"],
-                                                task["base_branch"] or "HEAD")
+            base_commit = self._base_commit(conn, task)
             fields["base_commit"] = base_commit
         branch = task["branch"] or f"backlog/{task['id']}"
         worktree = task["worktree"] or str(paths.worktree_dir(task["id"]))
@@ -406,6 +406,23 @@ class Runner:
         cwd = Path(worktree) / (task["subdir"] or "")
         cwd.mkdir(parents=True, exist_ok=True)
         return cwd
+
+    @staticmethod
+    def _base_commit(conn, task) -> str:
+        """Where a new branch starts: the base branch, or the branch of the task
+        this one starts after, unless that is merged into the base branch already."""
+        root = task["repo_root"]
+        base = gitops.resolve_commit(root, task["base_branch"] or "HEAD")
+        if not task["after_task"]:
+            return base
+        try:
+            before = tasks.get(conn, task["after_task"])
+        except tasks.TaskError:
+            return base
+        if not (before["branch"] and gitops.branch_exists(root, before["branch"])):
+            return base
+        tip = gitops.resolve_commit(root, before["branch"])
+        return base if gitops.is_ancestor(root, tip, base) else tip
 
     def _run_nightshift(self, cmd, cwd, env, console_log) -> int:
         with open(console_log, "ab") as out:
