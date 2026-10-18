@@ -142,6 +142,10 @@ def cmd_add(args, conn) -> int:
           + ("" if task["in_git"] else "  (not a git repository: runs in place)"))
     if task["after_task"]:
         print(f"  starts after: {task['after_task']}")
+    if task["in_git"] and gitops.is_dirty(task["repo_root"]):
+        print(f"claude-backlog: note: {task['repo_root']} has uncommitted changes; they "
+              "are not part of the task's starting point (commit them first if the "
+              "task needs them).", file=sys.stderr)
     return 0
 
 

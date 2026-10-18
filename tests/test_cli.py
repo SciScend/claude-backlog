@@ -22,6 +22,19 @@ def test_add_a_task_file_from_its_repo(conn, repo, capsys):
     assert task["priority"] == 3
 
 
+def test_add_notes_uncommitted_changes(conn, repo, capsys):
+    assert cli.main(["add", "-C", str(repo), "Clean task"]) == 0
+    assert capsys.readouterr().err == ""
+    (repo / "README.md").write_text("changed\n")
+    assert cli.main(["add", "-C", str(repo), "Dirty task"]) == 0
+    captured = capsys.readouterr()
+    assert captured.err.count("\n") == 1
+    assert f"{repo} has uncommitted changes" in captured.err
+    task_id = captured.out.split()[1].rstrip(":")
+    assert tasks.get(conn, task_id)["title"] == "Dirty task"
+    assert tasks.get(conn, task_id)["status"] == "queued"
+
+
 def test_add_from_stdin(conn, plain_dir, monkeypatch):
     monkeypatch.setattr("sys.stdin", io.StringIO("Prompt from stdin\nmore\n"))
     assert cli.main(["add", "-C", str(plain_dir), "--hold", "-t", "Stdin task", "-"]) == 0
