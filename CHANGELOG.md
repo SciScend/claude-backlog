@@ -36,3 +36,9 @@ First version.
 - `/backlog` skill for Claude Code, CLI (`add`, `list`, `go`, `stop`,
   `export`, `report`), systemd user service and launcher (`install`).
 - Run report and desktop notification when the queue stops.
+- A calmer, more consistent look for the board, the task panel and the
+  dialogs, in light and dark mode and on the phone: one scale for spacing,
+  radii and type, softer borders and shadows, clear hover, pressed and focus
+  states, and amber kept for the running task and the stop threshold only.
+- The project folder picker lists a folder that is reachable under several
+  paths through symlinks (say `~/projects` -> `/data/projects`) only once.

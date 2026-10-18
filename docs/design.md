@@ -410,7 +410,8 @@ the `/backlog` skill follows it (`claude-backlog template` prints it).
 
 The same page, laid out for a narrow screen: the columns become tabs
 (Queue first), and every card has large "to top", "up", "down" and "hold"
-buttons, because dragging on a phone is fiddly. Everything else works as
+buttons, because dragging on a phone is fiddly. The header scrolls away with
+the page and the tabs stay at the top, so the cards get the screen. Everything else works as
 on the computer: Run now, Stop, Starts when away ON/OFF, adding a task,
 reading `SUMMARY.md`, the live log. A change made on the phone shows up at
 once on the computer and the other way round (Server-Sent Events).
