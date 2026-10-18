@@ -4,11 +4,13 @@ FAKE_CLAUDE_MODE: "ok" (default), "blocking" (one question blocks the
 task), "error" (an error result), "garbage" (output that is not JSON).
 FAKE_CLAUDE_ARGS: a file to write the arguments, the working folder and
 the request (standard input) to, as JSON.
+FAKE_CLAUDE_WAIT: a file to wait for (up to 20 seconds) before answering.
 """
 
 import json
 import os
 import sys
+import time
 
 args = sys.argv[1:]
 request = sys.stdin.read()
@@ -16,6 +18,10 @@ record = os.environ.get("FAKE_CLAUDE_ARGS")
 if record:
     with open(record, "w") as f:
         json.dump({"args": args, "cwd": os.getcwd(), "request": request}, f)
+wait = os.environ.get("FAKE_CLAUDE_WAIT")
+deadline = time.time() + 20
+while wait and not os.path.exists(wait) and time.time() < deadline:
+    time.sleep(0.05)
 mode = os.environ.get("FAKE_CLAUDE_MODE", "ok")
 if mode == "garbage":
     print("something went wrong", file=sys.stderr)

@@ -69,6 +69,7 @@ class Service:
         self._local = threading.local()
         self._conns = []
         self._conns_lock = threading.Lock()
+        self._drafts: list[threading.Thread] = []
 
     def conn(self):
         """A connection for the calling thread (API calls run in a thread pool)."""
@@ -79,6 +80,47 @@ class Service:
             with self._conns_lock:
                 self._conns.append(conn)
         return conn
+
+    def start_draft(self, task_id) -> None:
+        """Have Claude write the task's prompt in the background."""
+        thread = threading.Thread(target=self._draft, args=(task_id,),
+                                  name=f"draft-{task_id}", daemon=True)
+        with self._conns_lock:
+            self._drafts = [t for t in self._drafts if t.is_alive()] + [thread]
+        thread.start()
+
+    def resume_drafts(self) -> None:
+        """Draft again the tasks left drafting when the service stopped."""
+        conn = self.conn()
+        for row in conn.execute("SELECT id FROM tasks WHERE status = 'drafting'"):
+            self.start_draft(row["id"])
+
+    def wait_drafts(self, timeout=60) -> None:
+        with self._conns_lock:
+            threads = list(self._drafts)
+        for thread in threads:
+            thread.join(timeout)
+
+    def _draft(self, task_id) -> None:
+        conn = db.connect(self.db_path)
+        try:
+            task = tasks.get(conn, task_id)
+            conf = settings.get_all(conn)
+            try:
+                result = draft.draft(task["description"] or "", task["project_dir"],
+                                     conf["prompt_template"], conf["draft_model"],
+                                     conf["draft_effort"])
+            except draft.DraftError as exc:
+                tasks.fail_draft(conn, task_id, str(exc))
+            else:
+                tasks.finish_draft(conn, task_id, result)
+        except tasks.TaskError:
+            pass  # deleted meanwhile
+        except Exception as exc:
+            logger.exception("drafting %s failed", task_id)
+            tasks.fail_draft(conn, task_id, f"The draft failed: {exc}")
+        finally:
+            conn.close()
 
     def close(self) -> None:
         with self._conns_lock:
@@ -148,6 +190,7 @@ def _card(task) -> dict:
             card["decisions"] = decisions_count(summary)
         card["commits"] = _commit_count(task)
     card["new"] = bool(task["finished_at"] and (task["seen_at"] or 0) < task["finished_at"])
+    card["blocking"] = len(tasks.open_blocking(task))
     return card
 
 
@@ -297,8 +340,11 @@ def get_state(request, _):
 def create_task(request, data):
     svc = _svc(request)
     allowed = {"prompt", "project_dir", "title", "priority", "status", "model", "effort",
-               "max_windows", "threshold", "max_attempts", "base_branch", "after_task"}
+               "max_windows", "threshold", "max_attempts", "base_branch", "after_task",
+               "description"}
     task = tasks.create(svc.conn(), **{k: v for k, v in data.items() if k in allowed})
+    if task["status"] == "drafting":
+        svc.start_draft(task["id"])
     return {"task": task}
 
 
@@ -339,6 +385,9 @@ def task_action(request, data):
         tasks.move(conn, task_id, "queued")
     elif action == "seen":
         tasks.mark_seen(conn, task_id)
+    elif action == "redraft":
+        tasks.start_draft(conn, task_id)
+        svc.start_draft(task_id)
     elif action == "archive":
         if task["status"] == "running":
             raise tasks.TaskError("the task is running; stop it first")
@@ -363,6 +412,14 @@ def task_action(request, data):
     else:
         raise tasks.TaskError(f"unknown action {action!r}")
     return {"task": tasks.get(conn, task_id)}
+
+
+def answer_questions(request, data):
+    answers = data.get("answers")
+    if not isinstance(answers, dict):
+        raise tasks.TaskError("answers must be an object: question number -> answer")
+    return {"task": tasks.answer(_svc(request).conn(), request.path_params["task_id"],
+                                 answers)}
 
 
 def task_diff(request, _):
@@ -651,6 +708,7 @@ def create_app(service: Service, on_shutdown=None) -> Starlette:
         Route("/api/tasks/{task_id}", h(patch_task), methods=["PATCH"]),
         Route("/api/tasks/{task_id}/move", h(move_task), methods=["POST"]),
         Route("/api/tasks/{task_id}/action", h(task_action), methods=["POST"]),
+        Route("/api/tasks/{task_id}/answers", h(answer_questions), methods=["POST"]),
         Route("/api/tasks/{task_id}/diff", h(task_diff)),
         Route("/api/tasks/{task_id}/log", h(task_log)),
         Route("/api/run", h(start_run), methods=["POST"]),
@@ -702,6 +760,7 @@ def serve(port=None, db_path=None) -> None:
     conn.close()
 
     service = Service(db_path=db_path, port=port)
+    service.resume_drafts()
     service.watcher = Watcher(service.runner, db_path)
     service.watcher.start()
     def shutdown():

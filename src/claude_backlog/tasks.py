@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import sqlite3
@@ -24,13 +25,20 @@ __all__ = [
     "update",
     "move",
     "set_status",
+    "start_draft",
+    "finish_draft",
+    "fail_draft",
+    "answer",
+    "open_blocking",
+    "with_answers",
     "delete",
     "parse_task_file",
     "format_task_file",
     "slugify",
 ]
 
-STATUSES = ("hold", "queued", "running", "done", "attention", "archived")
+# "drafting": Claude is writing the prompt; the task never runs in this state.
+STATUSES = ("drafting", "hold", "queued", "running", "done", "attention", "archived")
 PRIORITIES = {"high": 1, "normal": 2, "low": 3}
 PRIORITY_NAMES = {v: k for k, v in PRIORITIES.items()}
 
@@ -41,6 +49,8 @@ EDITABLE = {"title", "prompt", "priority", "model", "effort", "max_windows",
 FIXED_AFTER_START = {"project_dir", "base_branch", "after_task"}
 # A task that starts after another one may start once that one is in here.
 FINISHED = ("done", "archived")
+# Where the user's answers to Claude's questions go in the prompt.
+ANSWERS_HEADING = "## Answers from the user"
 
 _CYRILLIC = dict(zip(
     "абвгдежзийклмнопрстуфхцчшщъьюяыэё",
@@ -84,6 +94,7 @@ def _clean_max_windows(value):
 
 def to_dict(row: sqlite3.Row) -> dict:
     task = dict(row)
+    task["questions"] = json.loads(task["questions"]) if task["questions"] else []
     task["priority_name"] = PRIORITY_NAMES[task["priority"]]
     task["project_name"] = Path(task["project_dir"]).name
     task["in_git"] = bool(task["repo_root"])
@@ -191,11 +202,16 @@ def _title_from_prompt(prompt: str, skip=frozenset()) -> str:
     return "Untitled task"
 
 
-def create(conn, prompt, project_dir, title=None, priority="normal", status="queued",
-           model=None, effort=None, max_windows=None, threshold=None,
-           max_attempts=None, base_branch=None, after_task=None) -> dict:
+def create(conn, prompt=None, project_dir=None, title=None, priority="normal",
+           status="queued", model=None, effort=None, max_windows=None, threshold=None,
+           max_attempts=None, base_branch=None, after_task=None,
+           description=None) -> dict:
+    """A new task. Without a prompt but with a description, the task is
+    "drafting" until Claude has written its prompt (see start_draft), and
+    ``status`` is where it goes then."""
     prompt = (prompt or "").strip()
-    if not prompt:
+    description = (description or "").strip() or None
+    if not prompt and not description:
         raise TaskError("the prompt is empty")
     if status not in ("queued", "hold"):
         raise TaskError("a new task goes to the queue or on hold")
@@ -203,7 +219,10 @@ def create(conn, prompt, project_dir, title=None, priority="normal", status="que
     if not project_dir or not project.is_dir():
         raise TaskError(f"project folder {project_dir!r} does not exist")
     skip = _headings(settings.get(conn, "prompt_template"))
-    title = (title or "").strip() or _title_from_prompt(prompt, skip)
+    title = (title or "").strip() or _title_from_prompt(prompt or description, skip)
+    draft_target = None
+    if not prompt:
+        draft_target, status = status, "drafting"
     prio = _priority(priority)
     info = gitops.repo_info(project)
     if info and base_branch is None:
@@ -216,13 +235,15 @@ def create(conn, prompt, project_dir, title=None, priority="normal", status="que
         conn.execute(
             """INSERT INTO tasks (id, title, prompt, project_dir, repo_root, subdir,
                    base_branch, after_task, status, priority, position, model, effort,
-                   max_windows, threshold, max_attempts, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   max_windows, threshold, max_attempts, description, draft_target,
+                   created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (task_id, title, prompt, str(project),
              info.root if info else None, info.subdir if info else None,
              base_branch if info else None, after_task, status, prio,
              _end_position(conn, status, prio), model or None, effort or None,
-             _clean_max_windows(max_windows), threshold, max_attempts, now, now),
+             _clean_max_windows(max_windows), threshold, max_attempts, description,
+             draft_target, now, now),
         )
     return get(conn, task_id)
 
@@ -234,6 +255,9 @@ def update(conn, task_id, changes: dict) -> dict:
         raise TaskError(f"cannot change {', '.join(sorted(unknown))}")
     if task["status"] == "running":
         raise TaskError("the task is running; stop it before editing")
+    if task["status"] == "drafting" and {"title", "prompt"} & set(changes):
+        raise TaskError("Claude is still writing the prompt; edit it once the draft "
+                        "is done")
     if task["attempts"] and FIXED_AFTER_START & set(changes):
         changed = {k for k in FIXED_AFTER_START & set(changes)
                    if (changes[k] or None) != task[k]}
@@ -278,6 +302,8 @@ def update(conn, task_id, changes: dict) -> dict:
             clean.get("project_dir", task["project_dir"]))
     if "priority" in clean and clean["priority"] != task["priority"]:
         clean["position"] = _end_position(conn, task["status"], clean["priority"])
+    if task["draft_error"] and clean.get("prompt"):
+        clean["draft_error"] = None  # written by hand instead
     if not clean:
         return task
     clean["updated_at"] = db.now()
@@ -298,6 +324,12 @@ def move(conn, task_id, status, priority=None, index=None) -> dict:
         raise TaskError("tasks can only be moved to the queue or on hold")
     if task["status"] == "running":
         raise TaskError("the task is running; stop it first")
+    if task["status"] == "drafting":
+        raise TaskError("Claude is still writing the prompt; wait for the draft")
+    if status == "queued" and not task["prompt"].strip():
+        raise TaskError("the task has no prompt yet: retry the draft or write it")
+    if status == "queued" and open_blocking(task):
+        raise TaskError("answer the questions that block this task first")
     prio = task["priority"] if priority is None else _priority(priority)
     siblings = [
         r["position"]
@@ -333,6 +365,113 @@ def set_status(conn, task_id, status, **fields) -> dict:
     sets = ", ".join(f"{k} = ?" for k in fields)
     with db.transaction(conn):
         conn.execute(f"UPDATE tasks SET {sets} WHERE id = ?", (*fields.values(), task_id))
+    return get(conn, task_id)
+
+
+def _write(conn, task_id, fields, where="") -> bool:
+    """Set ``fields`` on the task; False when ``where`` did not match."""
+    fields = {**fields, "updated_at": db.now()}
+    sets = ", ".join(f"{k} = ?" for k in fields)
+    with db.transaction(conn):
+        cur = conn.execute(f"UPDATE tasks SET {sets} WHERE id = ? {where}",
+                           (*fields.values(), task_id))
+    return cur.rowcount > 0
+
+
+def start_draft(conn, task_id) -> dict:
+    """Have Claude write the prompt again after a draft failed."""
+    task = get(conn, task_id)
+    if not task["description"]:
+        raise TaskError("the task has no description to write the prompt from")
+    if task["status"] != "hold" or not task["draft_error"]:
+        raise TaskError("only a task whose draft failed can be drafted again")
+    _write(conn, task_id, {"status": "drafting", "draft_error": None,
+                           "draft_target": task["draft_target"] or "queued"})
+    return get(conn, task_id)
+
+
+def finish_draft(conn, task_id, result: dict) -> dict | None:
+    """Fill in Claude's draft. The task goes on hold when a question blocks
+    it, and where the user chose otherwise. None when the task was no longer
+    drafting (deleted or archived meanwhile)."""
+    row = conn.execute("SELECT * FROM tasks WHERE id = ? AND status = 'drafting'",
+                       (task_id,)).fetchone()
+    if row is None:
+        return None
+    task = to_dict(row)
+    questions = [{**q, "answer": ""} for q in result.get("questions") or []]
+    status = task["draft_target"] if task["draft_target"] in ("queued", "hold") \
+        else "queued"
+    if any(q["blocking"] for q in questions):
+        status = "hold"
+    fields = {"prompt": result["prompt"].strip(), "questions": json.dumps(questions),
+              "status": status, "draft_error": None,
+              "position": _end_position(conn, status, task["priority"])}
+    if (result.get("title") or "").strip():
+        fields["title"] = result["title"].strip()[:80]
+    if not _write(conn, task_id, fields, "AND status = 'drafting'"):
+        return None
+    return get(conn, task_id)
+
+
+def fail_draft(conn, task_id, error: str) -> dict | None:
+    """The draft failed: the task goes on hold with the error."""
+    row = conn.execute("SELECT priority FROM tasks WHERE id = ?", (task_id,)).fetchone()
+    if row is None:
+        return None
+    fields = {"status": "hold", "draft_error": error or "the draft failed",
+              "position": _end_position(conn, "hold", row["priority"])}
+    if not _write(conn, task_id, fields, "AND status = 'drafting'"):
+        return None
+    return get(conn, task_id)
+
+
+def open_blocking(task) -> list[dict]:
+    """The blocking questions that have no answer yet."""
+    return [q for q in task["questions"]
+            if q.get("blocking") and not (q.get("answer") or "").strip()]
+
+
+def with_answers(prompt: str, questions: list[dict]) -> str:
+    """The prompt with an "Answers from the user" section for the answered
+    questions, in place of an earlier one (none when nothing is answered)."""
+    lines = prompt.strip().splitlines()
+    if ANSWERS_HEADING in (line.strip() for line in lines):
+        start = next(i for i, line in enumerate(lines) if line.strip() == ANSWERS_HEADING)
+        end = next((i for i in range(start + 1, len(lines))
+                    if lines[i].startswith("## ")), len(lines))
+        lines = lines[:start] + lines[end:]
+    text = "\n".join(lines).strip()
+    answered = [q for q in questions if (q.get("answer") or "").strip()]
+    if not answered:
+        return text
+    section = [ANSWERS_HEADING, "",
+               "These answers replace what the prompt above assumes about the same "
+               "questions.", ""]
+    for q in answered:
+        answer = "\n  ".join(q["answer"].strip().splitlines())
+        section += [f"- {q['question']}", f"  Answer: {answer}"]
+    return text + "\n\n" + "\n".join(section)
+
+
+def answer(conn, task_id, answers: dict) -> dict:
+    """Record answers to Claude's questions (by number; empty clears one) and
+    put them into the prompt. No new call to Claude."""
+    task = get(conn, task_id)
+    if task["status"] in ("running", "drafting"):
+        raise TaskError("the task is running; stop it first" if task["status"] == "running"
+                        else "Claude is still writing the prompt")
+    questions = task["questions"]
+    for key, value in answers.items():
+        try:
+            index = int(key)
+        except (TypeError, ValueError):
+            raise TaskError(f"no question {key!r}") from None
+        if not 0 <= index < len(questions):
+            raise TaskError(f"no question {key!r}")
+        questions[index]["answer"] = str(value or "").strip()
+    _write(conn, task_id, {"questions": json.dumps(questions),
+                           "prompt": with_answers(task["prompt"], questions)})
     return get(conn, task_id)
 
 

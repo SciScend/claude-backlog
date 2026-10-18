@@ -259,3 +259,10 @@ def test_a_worktree_that_cannot_be_made_needs_attention(conn, repo, make_runner)
     task = tasks.get(conn, t["id"])
     assert task["status"] == "attention"
     assert "worktree" in task["note"]
+
+
+def test_a_drafting_task_never_runs(conn, plain_dir, calls, make_runner):
+    tasks.create(conn, None, plain_dir, description="Claude writes this one")
+    r = make_runner()
+    run_queue(r)
+    assert calls() == []

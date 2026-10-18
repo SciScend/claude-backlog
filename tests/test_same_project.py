@@ -147,7 +147,8 @@ def test_old_databases_get_the_new_column(tmp_path):
     version = conn.execute("SELECT schema_version FROM meta").fetchone()[0]
     assert version == db.SCHEMA_VERSION
     columns = {r[1] for r in conn.execute("PRAGMA table_info(tasks)")}
-    assert {"after_task", "base_ref"} <= columns
+    assert {"after_task", "base_ref", "description", "draft_target", "draft_error",
+            "questions"} <= columns
     conn.close()
 
 

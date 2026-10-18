@@ -148,6 +148,7 @@ def cmd_add(args, conn) -> int:
 def cmd_list(args, conn) -> int:
     rows = tasks.list_tasks(conn, include_archived=args.all)
     groups = [("Running", ["running"]), ("Queue", ["queued"]), ("On hold", ["hold"]),
+              ("Claude is writing the prompt", ["drafting"]),
               ("Needs attention", ["attention"])]
     if args.all:
         groups += [("Done", ["done"]), ("Archived", ["archived"])]

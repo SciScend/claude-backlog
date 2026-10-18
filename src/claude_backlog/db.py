@@ -16,7 +16,7 @@ from claude_backlog import paths
 
 __all__ = ["SCHEMA_VERSION", "connect", "transaction", "revision", "now"]
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 MIGRATIONS = {
     1: """
@@ -80,6 +80,14 @@ MIGRATIONS = {
     # The branch the base commit was taken from, when it is not the base branch.
     3: """
     ALTER TABLE tasks ADD COLUMN base_ref TEXT;
+    """,
+    # Claude writes the prompt in the background from the description: where
+    # the task goes afterwards, why the draft failed, and Claude's questions.
+    4: """
+    ALTER TABLE tasks ADD COLUMN description TEXT;
+    ALTER TABLE tasks ADD COLUMN draft_target TEXT;
+    ALTER TABLE tasks ADD COLUMN draft_error TEXT;
+    ALTER TABLE tasks ADD COLUMN questions TEXT;
     """,
 }
 
