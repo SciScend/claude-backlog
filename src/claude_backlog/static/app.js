@@ -942,7 +942,7 @@ function renderQuestions(questions) {
   newTask.questions = questions;
   $("#questions").hidden = !questions.length;
   $("#question-list").innerHTML = questions.map((q, i) => `<label class="question">
-      <span>${esc(q)}</span>
+      <span>${esc(q.question)}</span>
       <input data-answer="${i}" placeholder="Your answer (optional)" autocomplete="off"></label>`).join("");
 }
 
@@ -959,7 +959,7 @@ async function writeDraft(withAnswers) {
   }
   if (withAnswers) {
     const answered = $$("[data-answer]")
-      .map((el) => [newTask.questions[Number(el.dataset.answer)], el.value.trim()])
+      .map((el) => [newTask.questions[Number(el.dataset.answer)].question, el.value.trim()])
       .filter(([, answer]) => answer);
     if (!answered.length) return showError("Answer at least one question first.");
     description += "\n\nAnswers to your earlier questions:\n"

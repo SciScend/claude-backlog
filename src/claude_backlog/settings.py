@@ -44,6 +44,10 @@ DEFAULTS = {
     "effort": "",
     "max_windows": "2",
     "max_attempts": 3,
+    # Writing a task's prompt with Claude, separate from the task model (which
+    # is for runs only). Empty means Claude Code's own default.
+    "draft_model": "sonnet",
+    "draft_effort": "low",
     # Folders whose subfolders the new-task form offers as projects.
     "project_roots": [os.path.expanduser("~")],
     # What the new-task form puts in the prompt field. The lines in angle
@@ -57,6 +61,8 @@ DEFAULTS = {
 CHOICES = {
     "on_return": {"stop", "finish"},
     "effort": {"", "low", "medium", "high", "xhigh", "max"},
+    "draft_model": {"", "sonnet", "haiku", "opus"},
+    "draft_effort": {"", "low", "medium", "high", "xhigh", "max"},
 }
 
 

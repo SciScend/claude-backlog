@@ -306,7 +306,8 @@ def write_draft(request, data):
     conf = settings.get_all(_svc(request).conn())
     return draft.draft(str(data.get("description") or ""),
                        str(data.get("project_dir") or ""),
-                       conf["prompt_template"], conf["model"])
+                       conf["prompt_template"], conf["draft_model"],
+                       conf["draft_effort"])
 
 
 def get_task(request, _):
