@@ -156,10 +156,12 @@ drop zones ("Drag a task here") show only while a card is being dragged.
 
 - **On hold**: tasks that exist but must not run yet (drafts, waiting for
   something). The new task form can put a task here.
-- **Queue**: what will run, in the order shown, top first. It has three
-  priority groups: High, Normal, Low. Dragging a card moves it within a
-  group or into another group; that is how priority is changed. Arrows on
-  the card ("to top", "up", "down") do the same without dragging.
+- **Queue**: what will run, in the order shown, top first. A task marked
+  "waits for ..." is skipped until the task it starts after is done
+  (section 6, "Tasks on the same project"). It has three priority groups:
+  High, Normal, Low. Dragging a card moves it within a group or into
+  another group; that is how priority is changed. Arrows on the card ("to
+  top", "up", "down") do the same without dragging.
 - **Running**: the task being worked on: time so far, which 5-hour window,
   and the last lines of its log, updated live.
 - **Done**: finished tasks, newest first. Tasks finished since I last
@@ -367,12 +369,13 @@ The queue starts in two ways:
 
 1. **Run now** on the board, or `claude-backlog go`.
 2. **When I am away** (if "Starts when away" is ON): the screensaver has
-   been on for N minutes (default 15) and the queue has tasks.
+   been on for N minutes (default 15) and the queue has a task that can
+   run (one that does not wait for another task).
 
 It runs one task after another and stops when:
 
 - nightshift reports that the weekly threshold is reached (exit 3);
-- the queue is empty;
+- the queue is empty, or the tasks left in it all wait for other tasks;
 - the "until HH:MM" time has passed (the running task is not cut short;
   its windows-per-attempt limit bounds it);
 - I press Stop after this task, or Stop now;
@@ -452,6 +455,7 @@ be changed by dragging without rewriting files.
 | `project_dir` | absolute path of the project as I chose it |
 | `repo_root`, `base_branch`, `base_commit` | empty when the project is not a git repository; `base_commit` is fixed at the first attempt |
 | `after_task` | the task this one starts after, or empty (section 6, "Tasks on the same project"); fixed at the first attempt |
+| `base_ref` | the branch `base_commit` was taken from when it is not the base branch: the branch of the task this one starts after; empty otherwise |
 | `branch`, `worktree` | `backlog/<id>` and `~/.local/share/claude-backlog/worktrees/<id>`, once created |
 | `status` | `hold`, `queued`, `running`, `done`, `attention`, `archived` |
 | `priority` | 1 high, 2 normal, 3 low |
@@ -465,7 +469,8 @@ be changed by dragging without rewriting files.
 
 **settings**: key/value.
 
-Queue order: `status = queued`, then `priority`, then `position`. A
+Queue order: `status = queued`, then `priority`, then `position`. Tasks
+that wait for another task are skipped until that task is done. A
 deferred task keeps its place, so an unfinished high-priority task is picked
 up again first next time. Within one run, every queued task gets a turn
 before any task gets a second one; otherwise a task that used up its
@@ -592,7 +597,9 @@ task the board offers:
 ### The unattended preamble
 
 Prepended to every prompt. `{...}` is filled in from the task; the git
-lines are left out when the task does not run in a worktree.
+lines are left out when the task does not run in a worktree, and the line
+about `{base_ref}` is there only when the branch started from the branch
+of the task it starts after (`{base_ref}` is otherwise the base branch).
 
 ```
 This is an unattended run. Nobody will answer questions or approve anything.
@@ -610,7 +617,7 @@ This is an unattended run. Nobody will answer questions or approve anything.
   usage limit, or are about to, first record the exact progress there: what
   is done, what is half done, and the next step, so the work can be resumed.
 - You are working in a separate git worktree on the branch {branch}, started
-  from {base_branch} at {base_commit}. It is a fresh checkout: install
+  from {base_ref} at {base_commit}. It is a fresh checkout: install
   dependencies if the task needs them, and expect files that are not in git
   (for example .env) to be missing.
 - Work in small steps. After each step, run the relevant checks and commit
@@ -618,6 +625,9 @@ This is an unattended run. Nobody will answer questions or approve anything.
   working. Do not push, do not switch or create branches, do not merge.
 - Only change files inside this worktree and {task-dir}. Do not touch
   anything else, including the original project folder {project_dir}.
+- {base_ref} is the branch of the task "{after_title}", which ran before
+  this one and is not merged into {base_branch} yet. Its work is already in
+  this worktree: build on it, and do not undo it.
 - Do only what the task asks: no features, refactoring or configurability
   it does not ask for.
 - Fix causes, not symptoms. Do not delete, skip or weaken tests or checks
@@ -654,8 +664,9 @@ three ways, from most to least help:
    writes a self-contained unattended prompt from the conversation and the
    project (goal, files, how to check the result, what not to touch), shows
    it with the proposed title, priority and folder, and on my OK runs
-   `claude-backlog add`. The skill ships with the tool and is installed by
-   `claude-backlog install`.
+   `claude-backlog add`. When the task builds on another task of the same
+   project that is not merged yet, it adds `--after <id>`. The skill ships
+   with the tool and is installed by `claude-backlog install`.
 2. **The board's form** (section 3).
 3. **CLI**: `claude-backlog add -C ~/projects/acme-app -p high "prompt"`,
    `add task.md`, or `add -` to read the prompt from stdin.

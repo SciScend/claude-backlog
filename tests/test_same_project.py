@@ -4,7 +4,7 @@ import sqlite3
 
 import pytest
 
-from claude_backlog import cli, db, gitops, tasks
+from claude_backlog import cli, db, gitops, paths, tasks
 from claude_backlog.runner import Runner
 from claude_backlog.tasks import TaskError
 from conftest import git
@@ -103,6 +103,10 @@ def test_the_runner_starts_it_from_the_other_tasks_branch(conn, repo, plan, call
     assert len(calls()) == 2
     b = tasks.get(conn, b["id"])
     assert b["base_commit"] == git(repo, "rev-parse", f"backlog/{a['id']}")
+    assert b["base_ref"] == f"backlog/{a['id']}"
+    prompt = (paths.task_dir(b["id"]) / "prompt.md").read_text()
+    assert f"started\n  from backlog/{a['id']} at" in prompt
+    assert 'the branch of the task "a"' in prompt
     files = git(repo, "ls-tree", "--name-only", f"backlog/{b['id']}").split()
     assert "a.txt" in files and "b.txt" in files
     # Its own commits are only its own.
@@ -120,7 +124,10 @@ def test_after_a_merged_task_it_starts_from_the_base_branch(conn, repo, plan):
     b = tasks.create(conn, "b", repo, after_task=a["id"])
     plan({"exit": 0, "summary": True})
     run_queue(make_runner())
-    assert tasks.get(conn, b["id"])["base_commit"] == git(repo, "rev-parse", "main")
+    b = tasks.get(conn, b["id"])
+    assert b["base_commit"] == git(repo, "rev-parse", "main")
+    assert b["base_ref"] is None
+    assert "from main at" in (paths.task_dir(b["id"]) / "prompt.md").read_text()
 
 
 def test_the_run_says_why_it_stopped_when_only_waiting_tasks_are_left(conn, repo):
@@ -140,7 +147,7 @@ def test_old_databases_get_the_new_column(tmp_path):
     version = conn.execute("SELECT schema_version FROM meta").fetchone()[0]
     assert version == db.SCHEMA_VERSION
     columns = {r[1] for r in conn.execute("PRAGMA table_info(tasks)")}
-    assert "after_task" in columns
+    assert {"after_task", "base_ref"} <= columns
     conn.close()
 
 

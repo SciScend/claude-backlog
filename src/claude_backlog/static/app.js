@@ -440,7 +440,8 @@ function overviewHtml() {
   if (detail.summary_html) parts.push(`<section><h3>What Claude reports (SUMMARY.md)</h3><div class="summary">${detail.summary_html}</div></section>`);
   if (task.branch) {
     parts.push(`<section><h3>Branch</h3>
-      <p><span class="mono">${esc(task.branch)}</span>, from ${esc(task.base_branch || "")} at <span class="mono">${esc((task.base_commit || "").slice(0, 10))}</span>. ${commits.length} commit${commits.length === 1 ? "" : "s"}.</p>
+      <p><span class="mono">${esc(task.branch)}</span>, from ${esc(task.base_ref || task.base_branch || "")} at <span class="mono">${esc((task.base_commit || "").slice(0, 10))}</span>. ${commits.length} commit${commits.length === 1 ? "" : "s"}.</p>
+      ${task.base_ref ? `<p class="hint">That is the branch of "${esc(task.after_title || task.after_task || "")}", not merged into ${esc(task.base_branch || "the base branch")} when this task started, so merging this branch brings in that task's work too.</p>` : ""}
       ${task.worktree ? `<p>Worktree: <span class="mono">${esc(task.worktree)}</span></p>` : ""}
       ${detail.merge_command ? `<div class="copy"><code>${esc(detail.merge_command)}</code><button class="btn small" data-copy="${esc(detail.merge_command)}">Copy</button></div>` : ""}
       ${task.merged ? `<p>Merged into ${esc(task.base_branch || "the base branch")}.</p>` : ""}

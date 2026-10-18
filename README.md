@@ -236,8 +236,8 @@ Migrate every call in src/api/ from the v1 client to the v2 client. ...
 ```
 
 Optional fields: `status: hold`, `threshold`, `max-attempts`,
-`base-branch`, `after` (the id of a task to start after). Without `project`, `add` uses the git root of the file's
-folder.
+`base-branch`, `after` (the id of a task to start after). Without
+`project`, `add` uses the git root of the file's folder.
 
 ## Where things are
 

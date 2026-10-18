@@ -353,7 +353,7 @@ def task_action(request, data):
         if task["branch"] and task["repo_root"]:
             gitops.delete_branch(task["repo_root"], task["branch"])
         tasks.set_status(conn, task_id, task["status"], worktree=None, branch=None,
-                         base_commit=None, attempts=0)
+                         base_commit=None, base_ref=None, attempts=0)
     elif action == "delete":
         if task["worktree"] and task["repo_root"]:
             gitops.remove_worktree(task["repo_root"], task["worktree"])

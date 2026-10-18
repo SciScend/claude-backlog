@@ -309,7 +309,11 @@ class Runner:
         task = tasks.get(conn, task_id)
 
         prompt_file = tdir / "prompt.md"
-        prompt_file.write_text(build_prompt(task, tdir), encoding="utf-8")
+        after_title = None
+        if task["base_ref"] and task["after_task"]:
+            with contextlib.suppress(tasks.TaskError):
+                after_title = tasks.get(conn, task["after_task"])["title"]
+        prompt_file.write_text(build_prompt(task, tdir, after_title), encoding="utf-8")
 
         with db.transaction(conn):
             cur = conn.execute(
@@ -389,8 +393,9 @@ class Runner:
         fields = {}
         base_commit = task["base_commit"]
         if not base_commit:
-            base_commit = self._base_commit(conn, task)
+            base_commit, base_ref = self._base_commit(conn, task)
             fields["base_commit"] = base_commit
+            fields["base_ref"] = base_ref
         branch = task["branch"] or f"backlog/{task['id']}"
         worktree = task["worktree"] or str(paths.worktree_dir(task["id"]))
         gitops.ensure_worktree(task["repo_root"], branch, worktree, base_commit)
@@ -408,21 +413,27 @@ class Runner:
         return cwd
 
     @staticmethod
-    def _base_commit(conn, task) -> str:
+    def _base_commit(conn, task) -> tuple[str, str | None]:
         """Where a new branch starts: the base branch, or the branch of the task
-        this one starts after, unless that is merged into the base branch already."""
+        this one starts after, unless that is merged into the base branch already.
+
+        Returns the commit, and the other task's branch when it starts from
+        that (None when it starts from the base branch).
+        """
         root = task["repo_root"]
         base = gitops.resolve_commit(root, task["base_branch"] or "HEAD")
         if not task["after_task"]:
-            return base
+            return base, None
         try:
             before = tasks.get(conn, task["after_task"])
         except tasks.TaskError:
-            return base
+            return base, None
         if not (before["branch"] and gitops.branch_exists(root, before["branch"])):
-            return base
+            return base, None
         tip = gitops.resolve_commit(root, before["branch"])
-        return base if gitops.is_ancestor(root, tip, base) else tip
+        if gitops.is_ancestor(root, tip, base):
+            return base, None
+        return tip, before["branch"]
 
     def _run_nightshift(self, cmd, cwd, env, console_log) -> int:
         with open(console_log, "ab") as out:

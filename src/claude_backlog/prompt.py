@@ -25,7 +25,7 @@ This is an unattended run. Nobody will answer questions or approve anything.
 
 GIT_RULES = """\
 - You are working in a separate git worktree on the branch {branch}, started
-  from {base_branch} at {base_commit}. It is a fresh checkout: install
+  from {base_ref} at {base_commit}. It is a fresh checkout: install
   dependencies if the task needs them, and expect files that are not in git
   (for example .env) to be missing.
 - Work in small steps. After each step, run the relevant checks and commit
@@ -33,6 +33,13 @@ GIT_RULES = """\
   working. Do not push, do not switch or create branches, do not merge.
 - Only change files inside this worktree and {task_dir}. Do not touch
   anything else, including the original project folder {project_dir}.
+"""
+
+# Added when the branch started from the branch of an earlier task.
+AFTER_RULE = """\
+- {base_ref} is the branch of the task "{after_title}", which ran before
+  this one and is not merged into {base_branch} yet. Its work is already in
+  this worktree: build on it, and do not undo it.
 """
 
 PLAIN_RULES = """\
@@ -67,16 +74,25 @@ The task:
 """
 
 
-def build_prompt(task: dict, task_dir) -> str:
-    """The full prompt for one attempt: preamble plus the task's own prompt."""
+def build_prompt(task: dict, task_dir, after_title=None) -> str:
+    """The full prompt for one attempt: preamble plus the task's own prompt.
+
+    ``after_title`` is the title of the task whose branch this one started from.
+    """
     values = {
         "task_dir": str(task_dir),
         "project_dir": task["project_dir"],
         "branch": task.get("branch") or "",
         "base_branch": task.get("base_branch") or "",
+        "base_ref": task.get("base_ref") or task.get("base_branch") or "",
         "base_commit": (task.get("base_commit") or "")[:12],
+        "after_title": after_title or "",
     }
-    rules = GIT_RULES if task.get("worktree") else PLAIN_RULES
+    rules = PLAIN_RULES
+    if task.get("worktree"):
+        rules = GIT_RULES
+        if task.get("base_ref") and after_title:
+            rules += AFTER_RULE
     return (INTRO + rules + OUTRO).format(**values) + task["prompt"].strip() + "\n"
 
 

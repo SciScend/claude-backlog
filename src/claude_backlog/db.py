@@ -16,7 +16,7 @@ from claude_backlog import paths
 
 __all__ = ["SCHEMA_VERSION", "connect", "transaction", "revision", "now"]
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 MIGRATIONS = {
     1: """
@@ -76,6 +76,10 @@ MIGRATIONS = {
     # A task can start after another task (section 6 of the design).
     2: """
     ALTER TABLE tasks ADD COLUMN after_task TEXT;
+    """,
+    # The branch the base commit was taken from, when it is not the base branch.
+    3: """
+    ALTER TABLE tasks ADD COLUMN base_ref TEXT;
     """,
 }
 
