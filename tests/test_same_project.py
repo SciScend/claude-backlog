@@ -4,7 +4,7 @@ import sqlite3
 
 import pytest
 
-from claude_backlog import cli, db, gitops, paths, tasks
+from claude_backlog import cli, conflicts, db, gitops, paths, tasks
 from claude_backlog.runner import Runner
 from claude_backlog.tasks import TaskError
 from conftest import git
@@ -148,7 +148,7 @@ def test_old_databases_get_the_new_column(tmp_path):
     assert version == db.SCHEMA_VERSION
     columns = {r[1] for r in conn.execute("PRAGMA table_info(tasks)")}
     assert {"after_task", "base_ref", "description", "draft_target", "draft_error",
-            "questions"} <= columns
+            "questions", "merge_ref"} <= columns
     conn.close()
 
 
@@ -229,3 +229,148 @@ def test_the_board_shows_who_a_task_waits_for(client, conn, repo):  # noqa: F811
     info = client.get("/api/project-info", params={"path": str(repo)}).json()
     assert info["root"] == str(repo)
 
+
+
+# --- a branch inside another one ----------------------------------------------
+
+
+def test_a_branch_inside_a_later_one_is_not_checked_on_its_own(client, conn, repo):  # noqa: F811
+    a = finished(conn, repo, "a", {"README.md": "a\n"})
+    b = tasks.create(conn, "b", repo, after_task=a["id"])
+    branch_with(repo, f"backlog/{b['id']}", {"b.txt": "b\n"}, base=a["branch"])
+    tasks.set_status(conn, b["id"], "done", branch=f"backlog/{b['id']}",
+                     base_commit=git(repo, "rev-parse", a["branch"]), attempts=1)
+    (repo / "README.md").write_text("main\n")
+    git(repo, "commit", "-q", "-am", "main moves on")
+    cards = cards_by_title(client)
+    assert cards["a"]["included_in"] == {"task_id": b["id"], "with": "b"}
+    assert cards["a"]["conflicts"] == []
+    assert [c["with"] for c in cards["b"]["conflicts"]] == ["main"]
+    assert cards["a"]["followers"] == [{"task_id": b["id"], "with": "b", "status": "done"}]
+
+
+# --- the overlap hint -------------------------------------------------------------
+
+
+def overlaps(card):
+    return [(o["with"], o["files"]) for o in card["overlaps"]]
+
+
+def test_a_task_that_names_files_another_one_changes_gets_a_hint(client, conn, repo):  # noqa: F811
+    (repo / "app.py").write_text("x = 1\n")
+    git(repo, "add", ".")
+    git(repo, "commit", "-q", "-m", "app")
+    finished(conn, repo, "one", {"README.md": "one\n"})
+    tasks.create(conn, "Edit `README.md` and app.py.", repo, title="first")
+    tasks.create(conn, "Then the README.md again.", repo, title="second")
+    tasks.create(conn, "Write notes.txt from scratch.", repo, title="new file")
+    tasks.create(conn, "Also README.md.", repo, title="held", status="hold")
+    one_id = next(t["id"] for t in tasks.list_tasks(conn) if t["title"] == "one")
+    tasks.create(conn, "README.md once more.", repo, title="chained",
+                 after_task=one_id)
+    cards = cards_by_title(client)
+    assert overlaps(cards["first"]) == [("one", ["README.md"])]
+    # The queue runs in order, so a task is only compared with the ones before it.
+    assert overlaps(cards["second"]) == [("one", ["README.md"]),
+                                         ("first", ["README.md"])]
+    assert sorted(overlaps(cards["held"])) == [("chained", ["README.md"]),
+                                               ("first", ["README.md"]),
+                                               ("one", ["README.md"]),
+                                               ("second", ["README.md"])]
+    assert cards["new file"]["overlaps"] == []
+    assert cards["chained"]["overlaps"] == []
+    assert cards["one"]["overlaps"] == []
+
+
+def test_no_hint_once_the_other_branch_is_merged(client, conn, repo):  # noqa: F811
+    one = finished(conn, repo, "one", {"README.md": "one\n"})
+    tasks.create(conn, "Change README.md.", repo, title="later")
+    assert overlaps(cards_by_title(client)["later"]) == [("one", ["README.md"])]
+    git(repo, "merge", "-q", "--no-edit", one["branch"])
+    assert cards_by_title(client)["later"]["overlaps"] == []
+
+
+def test_no_hint_with_another_task_that_waits_for_this_one(client, conn, repo):  # noqa: F811
+    a = tasks.create(conn, "Change README.md.", repo, title="a")
+    tasks.create(conn, "Change README.md too.", repo, title="b", after_task=a["id"])
+    tasks.move(conn, a["id"], "queued", None, None)  # b is now ahead of a
+    assert cards_by_title(client)["a"]["overlaps"] == []
+
+
+# --- resolving a conflict with Claude --------------------------------------------
+
+
+def test_update_with_claude_merges_the_base_branch_in_a_branch_of_its_own(
+        client, conn, repo, plan):  # noqa: F811
+    a = tasks.create(conn, "Rewrite README.md", repo, title="a")
+    plan({"exit": 0, "summary": True, "commit": True, "file": "README.md",
+          "text": "from a\n"})
+    run_queue(make_runner())
+    (repo / "README.md").write_text("from main\n")
+    git(repo, "commit", "-q", "-am", "main moves on")
+    assert [c["with"] for c in cards_by_title(client)["a"]["conflicts"]] == ["main"]
+
+    r = client.post(f"/api/tasks/{a['id']}/action", json={"action": "resolve"})
+    assert r.status_code == 200, r.text
+    up = r.json()["task"]
+    assert up["title"] == 'Update "a" with main'
+    assert up["after_task"] == a["id"] and up["merge_ref"] == "main"
+    assert up["status"] == "queued"
+    assert "Merging them conflicts in: README.md." in up["prompt"]
+    assert "git merge main" in up["prompt"]
+    again = client.post(f"/api/tasks/{a['id']}/action", json={"action": "resolve"})
+    assert again.status_code == 400 and "already builds" in again.json()["error"]
+    assert cards_by_title(client)["a"]["followers"][0]["task_id"] == up["id"]
+
+    plan({"exit": 0, "summary": True,
+          "git": [["merge", "-q", "-X", "ours", "--no-edit", "main"]]})
+    run_queue(make_runner())
+    prompt = (paths.task_dir(up["id"]) / "prompt.md").read_text()
+    assert f"This task merges main into backlog/{up['id']}" in prompt
+    cards = cards_by_title(client)
+    assert cards["a"]["included_in"]["task_id"] == up["id"]
+    assert cards["a"]["conflicts"] == []
+    assert cards['Update "a" with main']["conflicts"] == []
+    # Merging the follow-up branch brings in both.
+    git(repo, "merge", "-q", "--no-edit", f"backlog/{up['id']}")
+    cards = cards_by_title(client)
+    assert cards["a"]["merged"] and cards['Update "a" with main']["merged"]
+
+
+def test_combine_with_claude_merges_the_other_tasks_branch(client, conn, repo):  # noqa: F811
+    one = finished(conn, repo, "one", {"README.md": "one\n"})
+    two = finished(conn, repo, "two", {"README.md": "two\n"})
+    r = client.post(f"/api/tasks/{one['id']}/action",
+                    json={"action": "resolve", "with": two["id"]})
+    assert r.status_code == 200, r.text
+    task = r.json()["task"]
+    assert task["title"] == 'Combine "one" with "two"'
+    assert task["merge_ref"] == two["branch"] and task["after_task"] == one["id"]
+    assert 'What the task "two" did' in task["prompt"]
+
+
+def test_follow_up_needs_a_done_task_with_a_branch(conn, repo, plain_dir):
+    queued = tasks.create(conn, "q", repo)
+    with pytest.raises(TaskError, match="only a done task"):
+        conflicts.follow_up(conn, queued["id"])
+    plain = tasks.create(conn, "p", plain_dir)
+    tasks.set_status(conn, plain["id"], "done")
+    with pytest.raises(TaskError, match="no branch"):
+        conflicts.follow_up(conn, plain["id"])
+    one = finished(conn, repo, "one", {"README.md": "one\n"})
+    with pytest.raises(TaskError, match="only the branch of a done task"):
+        conflicts.follow_up(conn, one["id"], queued["id"])
+
+
+def test_cli_lists_the_unmerged_tasks_of_a_repository(conn, repo, plain_dir, capsys):
+    one = finished(conn, repo, "one", {"README.md": "one\n"})
+    finished(conn, repo, "two", {"two.txt": "two\n"})
+    tasks.create(conn, "Next", repo, title="next")
+    git(repo, "merge", "-q", "--no-edit", one["branch"])
+    assert cli.main(["list", "-C", str(repo)]) == 0
+    out = capsys.readouterr().out
+    assert "one" not in out.replace("done", "")  # merged
+    assert "two" in out and "changes: two.txt" in out
+    assert "next" in out and "queued" in out
+    assert cli.main(["list", "-C", str(plain_dir)]) == 0
+    assert "not a git repository" in capsys.readouterr().out

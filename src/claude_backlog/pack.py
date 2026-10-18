@@ -18,7 +18,7 @@ from pathlib import Path
 
 from claude_backlog import gitops
 
-__all__ = ["build", "clear_cache", "keywords"]
+__all__ = ["build", "clear_cache", "keywords", "named_files"]
 
 MAX_FILES = 2000           # paths in the file list
 LIST_CHARS = 40_000        # the file list as a whole
@@ -244,9 +244,9 @@ def keywords(description: str) -> list[str]:
     return list(found)[:MAX_KEYWORDS]
 
 
-def _named(description: str, files: list[str]) -> set[str]:
-    """Files the description names, by path or by file name."""
-    tokens = {t.strip(".,;:()[]{}'\"`") for t in description.split()}
+def named_files(text: str, files: list[str]) -> set[str]:
+    """The files of ``files`` that ``text`` names, by path or by file name."""
+    tokens = {t.strip(".,;:()[]{}'\"`") for t in text.split()}
     tokens = {t.lstrip("./") for t in tokens if "." in t or "/" in t}
     tokens.discard("")
     named = set()
@@ -276,7 +276,7 @@ def _searchable(folder: Path, path: str) -> str | None:
 
 def _matches(folder: Path, files: list[str], description: str) -> str:
     words = keywords(description)
-    named = _named(description, files)
+    named = named_files(description, files)
     scores = {}
     for path in files[:SEARCH_FILES]:
         if path.rsplit("/", 1)[-1] in SKIP_FILES:

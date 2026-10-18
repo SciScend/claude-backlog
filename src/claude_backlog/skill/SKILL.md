@@ -19,13 +19,21 @@ next Claude session will know, so it must stand on its own.
 2. **Find the project folder.** Default: the git root of the current
    working directory. Use another folder only if the task is clearly about
    it.
-3. **Check for uncommitted changes.** If the project folder is in a git
-   repository, run `git -C "<project folder>" status --porcelain`. The task
-   runs in its own worktree that starts from the last commit, so
-   uncommitted changes are not part of it, and merging the task's branch
-   later can conflict with them. If there are any, keep the list of files
-   for the proposal and think of a short commit message that says what
-   they are (`git -C "<project folder>" diff` helps).
+3. **Check the repository.** If the project folder is in a git
+   repository, the task runs in its own worktree that starts from the last
+   commit, so:
+   - run `git -C "<project folder>" status --porcelain`. Uncommitted
+     changes are not part of the task, and merging the task's branch later
+     can conflict with them. If there are any, keep the list of files for
+     the proposal and think of a short commit message that says what they
+     are (`git -C "<project folder>" diff` helps);
+   - run `claude-backlog list -C "<project folder>"`. It lists the tasks of
+     the repository that are not merged yet, with the files their branches
+     change; `claude-backlog export <id>` shows the prompt of one that has
+     not run. The new task starts without their work. If it builds on one
+     of them, or will change files that one changes or names, it should
+     start after that task (if several, the one that runs last), so the
+     branches do not conflict later.
 4. **Collect what the next session needs**, by reading the code (read-only):
    the files and folders involved, how the project is built and tested (the
    exact commands), conventions that matter, and anything decided in this
@@ -56,8 +64,9 @@ next Claude session will know, so it must stand on its own.
 6. **Propose it.** Show the title (short, imperative), the priority (high,
    normal or low; normal unless the user said otherwise), the project folder,
    and the full prompt. Mention a model or effort only if the task needs one
-   that differs from the defaults. If step 3 found uncommitted changes, say
-   so: list the files (the first 20 and how many more), say that they are
+   that differs from the defaults. If step 3 found a task to start after,
+   name it and say which files the two share. If step 3 found uncommitted
+   changes, say so: list the files (the first 20 and how many more), say that they are
    not part of the task's starting point, and offer to commit them first,
    with your proposed commit message. Ask for an OK; apply any changes the
    user asks for.
@@ -84,9 +93,9 @@ next Claude session will know, so it must stand on its own.
    ```
 
    Add `--hold` if the user wants it on hold rather than in the queue.
-   If the task builds on another task of the same project that is not
-   merged yet (see `claude-backlog list -a`), add `--after <its id>`: it
-   then waits for that task and starts from its branch.
+   If step 3 found a task to start after and the user agreed, add
+   `--after <its id>`: the task then waits for that task and starts from
+   its branch.
 9. **Confirm** with the task id that `claude-backlog add` printed, and
    mention that the board (`claude-backlog open`) shows the queue. The task
    runs when the user presses Run now, or when they are away if that is

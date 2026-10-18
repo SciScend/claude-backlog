@@ -37,6 +37,9 @@ def main():
         subprocess.run(["git", "add", name], check=True)
         subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit",
                         "-q", "-m", "fake work"], check=True)
+    for args in step.get("git", []):
+        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
+                       check=True, capture_output=True)
     if step.get("dirty"):
         Path("left-over.txt").write_text("not committed\n")
     if step.get("summary"):

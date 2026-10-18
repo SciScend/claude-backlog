@@ -42,6 +42,13 @@ AFTER_RULE = """\
   this worktree: build on it, and do not undo it.
 """
 
+# Added for a task that resolves a merge conflict (the board's "Update with
+# Claude" and "Combine with Claude").
+MERGE_RULE = """\
+- This task merges {merge_ref} into {branch}: that one merge is allowed,
+  and it is the task itself.
+"""
+
 PLAIN_RULES = """\
 - Only change files inside {project_dir} and {task_dir}. Do not touch
   anything else.
@@ -87,12 +94,15 @@ def build_prompt(task: dict, task_dir, after_title=None) -> str:
         "base_ref": task.get("base_ref") or task.get("base_branch") or "",
         "base_commit": (task.get("base_commit") or "")[:12],
         "after_title": after_title or "",
+        "merge_ref": task.get("merge_ref") or "",
     }
     rules = PLAIN_RULES
     if task.get("worktree"):
         rules = GIT_RULES
         if task.get("base_ref") and after_title:
             rules += AFTER_RULE
+        if task.get("merge_ref"):
+            rules += MERGE_RULE
     return (INTRO + rules + OUTRO).format(**values) + task["prompt"].strip() + "\n"
 
 

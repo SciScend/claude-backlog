@@ -205,10 +205,11 @@ def _title_from_prompt(prompt: str, skip=frozenset()) -> str:
 def create(conn, prompt=None, project_dir=None, title=None, priority="normal",
            status="queued", model=None, effort=None, max_windows=None, threshold=None,
            max_attempts=None, base_branch=None, after_task=None,
-           description=None) -> dict:
+           description=None, merge_ref=None) -> dict:
     """A new task. Without a prompt but with a description, the task is
     "drafting" until Claude has written its prompt (see start_draft), and
-    ``status`` is where it goes then."""
+    ``status`` is where it goes then. ``merge_ref`` is set for a task that
+    resolves a merge conflict: the branch it merges into its own."""
     prompt = (prompt or "").strip()
     description = (description or "").strip() or None
     if not prompt and not description:
@@ -236,14 +237,14 @@ def create(conn, prompt=None, project_dir=None, title=None, priority="normal",
             """INSERT INTO tasks (id, title, prompt, project_dir, repo_root, subdir,
                    base_branch, after_task, status, priority, position, model, effort,
                    max_windows, threshold, max_attempts, description, draft_target,
-                   created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   merge_ref, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (task_id, title, prompt, str(project),
              info.root if info else None, info.subdir if info else None,
              base_branch if info else None, after_task, status, prio,
              _end_position(conn, status, prio), model or None, effort or None,
              _clean_max_windows(max_windows), threshold, max_attempts, description,
-             draft_target, now, now),
+             draft_target, merge_ref if info else None, now, now),
         )
     return get(conn, task_id)
 

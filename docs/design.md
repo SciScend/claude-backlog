@@ -185,9 +185,12 @@ prompt).
 The card shows the title, the project (folder name), priority, model and
 effort when they differ from the defaults, and attempts so far. A task that
 starts after another one says so ("waits for ..." until that task is
-done). A finished task's card says when its branch is already merged, and
-warns when it would conflict with its base branch or with another
-finished task's branch (section 6, "Tasks on the same project"). While
+done). A finished task's card says when its branch is already merged, or
+contained in another task's branch, and warns when merging it would
+conflict with its base branch or with another finished task's branch; a
+task that has not started yet warns when its prompt names files that
+another unmerged task of the same repository changes too (section 6,
+"Tasks on the same project"). While
 Claude writes the prompt the card says "drafting"; when the draft failed
 it shows the error, and when Claude asked questions it shows how many and
 whether one blocks the task.
@@ -201,7 +204,9 @@ Clicking a card opens a side panel:
 - `SUMMARY.md` rendered, when there is one;
 - the branch: name, base commit, list of commits, changed files with a
   diff view, and the merge check (which branches it conflicts with, and in
-  which files);
+  which files), with "Update with Claude" or "Combine with Claude";
+- for a task that has not started, the files it shares with other
+  unmerged tasks, with "Start after it";
 - the runs: start, end, result, nightshift exit code, link to the log;
 - the full log of the running attempt, live;
 - buttons: Run next, Hold, Retry, Archive, Delete, Open worktree folder,
@@ -253,9 +258,12 @@ whether the folder is a git repository (the task gets its own branch) or
 not (it then runs in the folder itself, without a branch, see section 6),
 and warns when the repository has uncommitted changes (they are not part
 of the task's starting point, and merging the task's branch later can
-conflict with them).
+conflict with them). It also lists the tasks of the same repository that
+are not merged yet, with their state ("2 tasks of this project are not
+merged yet: ..."): the new task starts without their work, so if it
+changes the same files, "Start from" should be "after" one of them.
 
-The warning offers **Commit now**, so I can deal with them while I am
+The warning about uncommitted changes offers **Commit now**, so I can deal with them while I am
 there to see what gets committed. It opens the list of changed files
 (from `git status --porcelain`; the first 50, then "and N more") and a
 commit message field that starts empty; the commit button stays disabled
@@ -545,6 +553,7 @@ be changed by dragging without rewriting files.
 | `repo_root`, `base_branch`, `base_commit` | empty when the project is not a git repository; `base_commit` is fixed at the first attempt |
 | `after_task` | the task this one starts after, or empty (section 6, "Tasks on the same project"); fixed at the first attempt |
 | `base_ref` | the branch `base_commit` was taken from when it is not the base branch: the branch of the task this one starts after; empty otherwise |
+| `merge_ref` | for a task made by "Update with Claude" or "Combine with Claude": the branch it merges into its own branch (the base branch, or the other task's branch); empty otherwise |
 | `branch`, `worktree` | `backlog/<id>` and `~/.local/share/claude-backlog/worktrees/<id>`, once created |
 | `status` | `drafting`, `hold`, `queued`, `running`, `done`, `attention`, `archived` |
 | `description` | what I asked for in my own words, when Claude wrote the prompt from it |
@@ -649,7 +658,7 @@ is lost and the branch always shows the full state.
 Tasks run one at a time, but each starts from the base branch as it is
 when the task starts. Two tasks on the same project therefore do not see
 each other's work unless the first one has been merged by then, and their
-branches can conflict when both are merged. Three rules handle that:
+branches can conflict when both are merged. Five rules handle that:
 
 1. **Independent by default.** Each task's branch starts from its base
    branch, so every branch can be reviewed, merged or thrown away on its
@@ -671,10 +680,47 @@ branches can conflict when both are merged. Three rules handle that:
    the same repository: `git merge-tree --write-tree` (git 2.38 or later)
    merges in memory and touches no files. Results are cached by the
    commits involved, so they are only computed again when a branch moves.
-   The card warns ("conflicts with main", "conflicts with <task>") and the
-   detail panel lists the files. With an older git, the check is left out.
-   A conflict is resolved by merging one branch, then the other by hand,
-   or with a new task that merges it and resolves the conflicts.
+   The card warns ("merge conflict with main", "merge conflict with
+   <task>") and the detail panel lists the files; it says plainly that the
+   task itself finished, and only merging needs care. A branch that is
+   contained in the branch of another finished task (because that one
+   started after it) is not checked on its own: its card says "in the
+   branch of <task>", since merging that one brings it in. With an older
+   git, the check is left out. A conflict is resolved by merging one
+   branch, then the other by hand, or with rule 5.
+4. **A hint before a task starts, with no model.** When the prompt of a
+   task that has not started yet names files (by path or file name, as a
+   drafted prompt does) that another unmerged task of the same repository
+   changes, the card says "may change the same files as <task>" and the
+   detail panel lists the files with a **Start after it** button. The
+   other task is one that runs before it: running, finished with a branch
+   that is not merged, or ahead of it in the queue (for a task on hold:
+   any queued task). Its files are the ones its branch changed (`git diff
+   --name-only`, plus what its prompt names while it runs), or, before it
+   has run, the ones its prompt names. A task that already starts after
+   another one gets no hint, and neither does one whose prompt names no
+   files. It is only a hint: tasks stay independent unless I choose
+   otherwise. Before a prompt exists, the new task form lists the
+   unmerged tasks of the repository (section 3), and the `/backlog` skill
+   checks `claude-backlog list -C <folder>` (section 7).
+5. **Resolving a conflict with Claude.** For a done task, each conflict
+   the merge check finds comes with a button that queues a follow-up task
+   whose prompt the board writes itself, with no model:
+   - **Update with Claude** (a conflict with the base branch): the new
+     task starts after the conflicting one, so its branch starts from
+     that branch; it merges the base branch into its own branch, resolves
+     the conflicts so that both sides keep what they meant to do, and
+     runs the project's checks.
+   - **Combine with Claude** (a conflict with another done task): the
+     same, merging the other task's branch instead.
+
+   The follow-up task stores the branch to merge in `merge_ref`, and its
+   preamble allows that one merge into its own branch. Merging the
+   follow-up task's branch brings in the original task's work (and with
+   Combine, the other task's too), so their cards then say "in the branch
+   of <follow-up>". The buttons are left out while another task already
+   builds on the branch. Backlog still merges nothing into the base
+   branch.
 
 ### After a task
 
@@ -693,6 +739,10 @@ Prepended to every prompt. `{...}` is filled in from the task; the git
 lines are left out when the task does not run in a worktree, and the line
 about `{base_ref}` is there only when the branch started from the branch
 of the task it starts after (`{base_ref}` is otherwise the base branch).
+For a task with `merge_ref` (section 6, rule 5 of "Tasks on the same
+project"), one more line follows it: "This task merges {merge_ref} into
+{branch}: that one merge is allowed, and it is the task itself."
+
 
 ```
 This is an unattended run. Nobody will answer questions or approve anything.
@@ -757,8 +807,10 @@ three ways, from most to least help:
    writes a self-contained unattended prompt from the conversation and the
    project (goal, files, how to check the result, what not to touch), shows
    it with the proposed title, priority and folder, and on my OK runs
-   `claude-backlog add`. When the task builds on another task of the same
-   project that is not merged yet, it adds `--after <id>`. Before the
+   `claude-backlog add`. It runs `claude-backlog list -C <project folder>`
+   to see the tasks of the same repository that are not merged yet; when
+   the new task builds on one of them, or will change the same files, it
+   proposes `--after <id>` and says why. Before the
    proposal it runs `git -C <project folder> status --porcelain`; when the
    repository has uncommitted changes, the proposal says so and offers to
    commit them first, with the list of files and a proposed message. It
@@ -791,7 +843,9 @@ claude-backlog install [--phone] | uninstall
                                      --phone also sets up tailscale serve
 claude-backlog open                  open the board in the browser
 claude-backlog add [-C DIR] [-p high|normal|low] [--hold] [--after ID] PROMPT | FILE | -
-claude-backlog list                  the queue in run order, plus running and attention
+claude-backlog list [-a] [-C DIR]     the queue in run order, plus running and attention;
+                                     -a adds done and archived; -C DIR shows the tasks of
+                                     that repository that are not merged yet
 claude-backlog go [--until HH:MM]    same as Run now
 claude-backlog stop [--now]          stop after the current task, or now
 claude-backlog export ID             write the task as a task file
@@ -903,3 +957,11 @@ Decided in review (2026-10-18):
 6. **Tasks on the same project**: independent branches by default, "start
    after" for tasks that build on each other, and a merge check on the
    board; backlog still never merges on its own (section 6).
+7. **Overlapping tasks** (after a run where four tasks on one project
+   came back with branches that conflicted with each other): a hint
+   before a task starts when its prompt names files another unmerged
+   task changes, and follow-up tasks that resolve a conflict ("Update
+   with Claude", "Combine with Claude") in a branch of their own, so the
+   branch to merge is reviewed like any other. Chaining every task on a
+   project by default was rejected: one failed task would hold up the
+   rest, and no branch could be merged on its own.

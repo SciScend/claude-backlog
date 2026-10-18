@@ -286,7 +286,8 @@ def _detail(svc: Service, task_id) -> dict:
     task = next((c for c in _cards(conn) if c["id"] == task_id), None)
     if task is None:  # archived
         task = _card(tasks.get(conn, task_id))
-        task.update(after_title=None, waiting=False, merged=False, conflicts=[])
+        task.update(after_title=None, waiting=False, merged=False, conflicts=[],
+                    included_in=None, overlaps=[], followers=[])
     summary = _read(_summary_path(task_id))
     runs = [dict(r) for r in conn.execute(
         "SELECT * FROM runs WHERE task_id = ? ORDER BY started_at DESC", (task_id,))]
@@ -375,6 +376,9 @@ def task_action(request, data):
         tasks.move(conn, task_id, "queued")
     elif action == "seen":
         tasks.mark_seen(conn, task_id)
+    elif action == "resolve":
+        # "Update with Claude" (no "with") or "Combine with Claude".
+        return {"task": conflicts.follow_up(conn, task_id, data.get("with") or None)}
     elif action == "redraft":
         tasks.start_draft(conn, task_id)
         svc.start_draft(task_id)

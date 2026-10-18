@@ -17,6 +17,8 @@ __all__ = [
     "is_ancestor",
     "branch_tips",
     "merge_conflicts",
+    "changed_names",
+    "tracked_files",
     "ensure_worktree",
     "has_identity",
     "identity_env",
@@ -198,6 +200,18 @@ def merge_conflicts(repo_root, ours, theirs) -> list[str] | None:
             c in "0123456789abcdef" for c in lines[0]):
         return [line for line in lines[1:] if line]
     return None
+
+
+def changed_names(repo_root, base, tip) -> list[str]:
+    """The files that differ between two commits."""
+    out = git("diff", "--name-only", "--no-renames", base, tip, cwd=repo_root, check=False)
+    return [line for line in out.splitlines() if line]
+
+
+def tracked_files(repo_root, commit) -> list[str]:
+    """Every file in ``commit``, relative to the repository root."""
+    out = git("ls-tree", "-r", "-z", "--name-only", commit, cwd=repo_root, check=False)
+    return [p for p in out.split("\0") if p]
 
 
 def branch_exists(repo_root, branch) -> bool:

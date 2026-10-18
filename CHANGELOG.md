@@ -29,6 +29,14 @@ First version.
 - Tasks on the same project: a task can start after another one (it waits,
   then starts from that task's branch); the board checks finished branches
   for merge conflicts with their base branch and with each other.
+- Overlapping tasks: a task that has not run yet warns when its prompt
+  names files that another unmerged task changes, with "Start after it";
+  the new-task form lists the project's unmerged tasks, and `list -C DIR`
+  shows them for the `/backlog` skill. A merge conflict comes with "Update
+  with Claude" or "Combine with Claude", which queue a follow-up task that
+  merges the other branch into a branch of its own and resolves the
+  conflicts. A branch contained in another finished branch is shown as
+  part of it instead of being checked on its own.
 - Uncommitted changes when a task is added: the new-task form offers
   "Commit now" (the changed files, a commit message, your hooks and git
   identity); the `/backlog` skill offers to commit them first; `add` prints

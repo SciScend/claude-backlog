@@ -203,7 +203,9 @@ function ticket(task) {
     if (task.decisions) meta.push(`<span>${task.decisions} decision${task.decisions === 1 ? "" : "s"} for you</span>`);
   }
   if (task.merged) meta.push("<span>merged</span>");
-  for (const c of task.conflicts || []) meta.push(`<span class="warn">conflicts with ${esc(c.with)}</span>`);
+  if (task.included_in) meta.push(`<span>in the branch of ${esc(task.included_in.with)}</span>`);
+  for (const c of task.conflicts || []) meta.push(`<span class="warn">merge conflict with ${esc(c.with)}</span>`);
+  for (const o of task.overlaps || []) meta.push(`<span class="warn">may change the same files as ${esc(o.with)}</span>`);
   const movable = task.status === "queued" || task.status === "hold";
   let moves = "";
   if (task.status === "queued") {
@@ -492,6 +494,7 @@ function overviewHtml() {
     ${task.draft_error ? `<p class="note-box">${esc(task.draft_error)}<br>Retry the draft, or write the prompt yourself.</p>` : ""}
     <div class="actions-bar">${actions.map(([a, label]) => `<button class="btn small${a === "delete" ? " danger" : ""}" data-action="${a}">${label}</button>`).join("")}</div></section>`);
   if (task.questions && task.questions.length && task.status !== "running") parts.push(questionsHtml(task));
+  parts.push(overlapsHtml(task));
   if (task.description && (task.status === "drafting" || task.draft_error)) {
     parts.push(`<section><h3>Your description</h3><pre>${esc(task.description)}</pre></section>`);
   }
@@ -505,11 +508,7 @@ function overviewHtml() {
       ${task.merged ? `<p>Merged into ${esc(task.base_branch || "the base branch")}.</p>` : ""}
       ${task.status !== "running" && task.status !== "queued" ? '<p><button class="btn small danger" data-action="delete-branch">Delete the branch</button></p>' : ""}
     </section>`);
-    if (task.conflicts && task.conflicts.length) {
-      parts.push(`<section><h3>Merge check</h3>
-        ${task.conflicts.map((c) => `<p class="note-box">Conflicts with ${c.task_id ? "the branch of " : ""}"${esc(c.with)}" in ${c.files.map((f) => `<span class="mono">${esc(f)}</span>`).join(", ")}.</p>`).join("")}
-        <p class="hint">Merge one branch first; the other then needs its conflicts resolved, by hand or with a new task that merges it and resolves them.</p></section>`);
-    }
+    parts.push(mergeCheckHtml(task));
   } else if (!task.in_git) {
     parts.push("<section><p class=\"hint\">This folder is not a git repository, so the task runs in the folder itself, without a branch.</p></section>");
   }
@@ -522,6 +521,52 @@ function overviewHtml() {
   if (detail.state_md) parts.push(`<section><h3>Progress notes (STATE.md)</h3><pre>${esc(detail.state_md)}</pre></section>`);
   parts.push(`<section><p class="hint">Task files: <span class="mono">${esc(detail.task_dir)}</span></p></section>`);
   return parts.join("");
+}
+
+function fileList(files) {
+  return files.map((f) => `<span class="mono">${esc(f)}</span>`).join(", ");
+}
+
+// Which branches this one would conflict with, and the follow-up tasks
+// that resolve a conflict ("Update with Claude", "Combine with Claude").
+function mergeCheckHtml(task) {
+  const parts = [];
+  if (task.included_in) {
+    parts.push(`<p>This branch is part of the branch of "${esc(task.included_in.with)}": merging that one brings this work in too.</p>`);
+  }
+  const followers = task.followers || [];
+  const canResolve = task.status === "done" && !followers.length;
+  const isDone = (id) => state.tasks.some((t) => t.id === id && t.status === "done");
+  for (const c of task.conflicts || []) {
+    if (c.task_id) {
+      parts.push(`<div class="note-box"><p>This branch and the branch of "${esc(c.with)}" both change ${fileList(c.files)}, so merging both would conflict.</p>
+        ${canResolve && isDone(c.task_id) ? `<button class="btn small" data-resolve="${esc(c.task_id)}">Combine with Claude</button>` : ""}</div>`);
+    } else {
+      parts.push(`<div class="note-box"><p>Merging this branch into ${esc(c.with)} would conflict in ${fileList(c.files)}: ${esc(c.with)} has changed since the task started.</p>
+        ${canResolve ? '<button class="btn small" data-resolve="">Update with Claude</button>' : ""}</div>`);
+    }
+  }
+  if (task.conflicts && task.conflicts.length) {
+    parts.push(followers.length
+      ? `<p class="hint">"${esc(followers[0].with)}" builds on this branch; merge that one once it is done.</p>`
+      : `<p class="hint">The task itself finished; only merging needs care. ${task.status === "done"
+        ? "Update with Claude queues a task that starts from this branch, merges the newer branch into it, resolves the conflicts and runs the checks; Combine with Claude does the same with the other task's branch. You then merge that task's branch, which brings this one in. Or merge one branch first and resolve the rest by hand."
+        : "Merge one branch first and resolve the rest by hand, or run this task again."}</p>`);
+  }
+  return parts.length ? `<section><h3>Merge check</h3>${parts.join("")}</section>` : "";
+}
+
+// Before a task starts: other unmerged tasks that change the files its prompt names.
+function overlapsHtml(task) {
+  if (!task.overlaps || !task.overlaps.length) return "";
+  const statusOf = (id) => (state.tasks.find((t) => t.id === id) || {}).status;
+  return `<section><h3>Same files as other tasks</h3>
+    ${task.overlaps.map((o) => {
+      const started = ["running", "done", "attention"].includes(statusOf(o.task_id));
+      return `<div class="note-box"><p>The prompt names ${fileList(o.files)}, which "${esc(o.with)}" ${started ? "changes" : "names"} too. That task runs first, and this one would start without its work, so the two branches may conflict when both are merged.</p>
+        <button class="btn small" data-start-after="${esc(o.task_id)}">Start after it</button></div>`;
+    }).join("")}
+    <p class="hint">Start after it: this task waits for that one and starts from its branch, so merging this one brings in both. Leave it as it is if the tasks change different parts of these files.</p></section>`;
 }
 
 // Claude's questions, each with what the prompt assumes and an answer field.
@@ -673,6 +718,19 @@ function setupPanel() {
     const log = e.target.closest("[data-log]");
     const answers = e.target.closest("[data-answers]");
     if (answers) return saveAnswers(answers.dataset.answers === "queue");
+    const resolve = e.target.closest("[data-resolve]");
+    if (resolve) {
+      const result = await act(api("POST", `/api/tasks/${encodeURIComponent(openTaskId)}/action`,
+        { action: "resolve", with: resolve.dataset.resolve || null }));
+      if (result) toast(`Queued "${result.task.title}".`);
+      return loadDetail();
+    }
+    const startAfter = e.target.closest("[data-start-after]");
+    if (startAfter) {
+      await act(api("PATCH", `/api/tasks/${encodeURIComponent(openTaskId)}`, { after_task: startAfter.dataset.startAfter }),
+        "It now starts after that task.");
+      return loadDetail();
+    }
     if (copy) {
       try { await navigator.clipboard.writeText(copy.dataset.copy); toast("Copied."); }
       catch (err) { toast("Copy failed; select the text instead."); }
@@ -959,6 +1017,19 @@ function setupPicker() {
   });
 }
 
+// The tasks of the repository that are not merged yet: a new task starts
+// without their work, so it should start after one it shares files with.
+function showUnmerged(root) {
+  const box = $("#unmerged");
+  const names = { hold: "on hold", queued: "queued", running: "running", done: "done", attention: "needs attention", drafting: "drafting" };
+  const open = root ? state.tasks.filter((t) => t.repo_root === root && !t.merged) : [];
+  box.hidden = !open.length;
+  if (!open.length) return;
+  box.textContent = `${open.length === 1 ? "1 task of this project is" : `${open.length} tasks of this project are`} not merged yet: `
+    + open.map((t) => `${t.title} (${names[t.status] || t.status})`).join(", ")
+    + ". The new task starts without their work: if it changes the same files as one of them, choose \"after\" that task in Start from.";
+}
+
 // Shows what kind of folder the project is; returns whether it exists.
 async function checkProject() {
   const form = $("#new-form");
@@ -969,6 +1040,7 @@ async function checkProject() {
   info.className = "hint";
   resetCommit(path, false);
   $("#for-project").textContent = path ? `Project: ${tilde(path)}` : "";
+  showUnmerged(null);
   if (!path) { info.textContent = ""; wrap.hidden = true; return false; }
   try {
     const data = await api("GET", `/api/project-info?path=${encodeURIComponent(path)}`);
@@ -991,6 +1063,7 @@ async function checkProject() {
       + (after.length ? `<optgroup label="After a task (its branch, once it is done)">${after.map((o) => `<option value="after:${esc(o.id)}">${esc(o.label)}</option>`).join("")}</optgroup>` : "");
     wrap.hidden = !data.branches.length && !after.length;
     info.textContent = `Git repository. The task gets its own branch, starting from ${data.branch || "the current commit"}.`;
+    showUnmerged(data.root);
     if (data.dirty) {
       info.textContent += " It has uncommitted changes: they are not part of the task's starting point, and merging the task's branch later can conflict with them.";
       info.className = "hint warn";

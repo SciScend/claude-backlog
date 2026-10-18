@@ -16,7 +16,7 @@ from claude_backlog import paths
 
 __all__ = ["SCHEMA_VERSION", "connect", "transaction", "revision", "now"]
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 MIGRATIONS = {
     1: """
@@ -88,6 +88,10 @@ MIGRATIONS = {
     ALTER TABLE tasks ADD COLUMN draft_target TEXT;
     ALTER TABLE tasks ADD COLUMN draft_error TEXT;
     ALTER TABLE tasks ADD COLUMN questions TEXT;
+    """,
+    # A task made to resolve a merge conflict: the branch it merges into its own.
+    5: """
+    ALTER TABLE tasks ADD COLUMN merge_ref TEXT;
     """,
 }
 

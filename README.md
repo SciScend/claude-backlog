@@ -191,6 +191,17 @@ independent: you can merge or drop each one on its own.
   and against the other finished branches of the same repository (with
   `git merge-tree`, which touches no files; git 2.38 or later). A card that
   would conflict says so, and the task panel lists the files.
+- A conflict is not a failed task, and you need not resolve it by hand:
+  **Update with Claude** (a conflict with the base branch) or **Combine
+  with Claude** (a conflict with another task's branch) queues a follow-up
+  task that starts from the task's branch, merges the other branch into
+  it, resolves the conflicts and runs the checks. You then review and
+  merge that task's branch, which brings in the original one.
+- Before a task runs, its card warns when its prompt names files that
+  another unmerged task changes ("may change the same files as ..."), with
+  a **Start after it** button. The new task form lists the tasks of the
+  project that are not merged yet, and `/backlog` checks them with
+  `claude-backlog list -C <folder>`.
 
 ### From your phone
 
@@ -230,7 +241,8 @@ claude-backlog install [--phone]     install the service, the /backlog skill and
 claude-backlog uninstall             remove them (your tasks stay)
 claude-backlog open                  open the board in the browser
 claude-backlog add [-C DIR] [-p high|normal|low] [-t TITLE] [--hold] [--after ID] PROMPT | FILE | -
-claude-backlog list [-a]             the queue, what runs, what needs attention
+claude-backlog list [-a] [-C DIR]    the queue, what runs, what needs attention;
+                                     -C: the tasks of DIR's repository not merged yet
 claude-backlog go [--until HH:MM]    start the queue now
 claude-backlog stop [--now]          stop after the current task, or now
 claude-backlog export ID             print a task as a task file

@@ -11,7 +11,7 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
-from claude_backlog import __version__, db, gitops, report, settings, tasks
+from claude_backlog import __version__, conflicts, db, gitops, report, settings, tasks
 
 __all__ = ["build_parser", "main", "run_cli"]
 
@@ -66,6 +66,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("list", help="show the queue and what needs attention")
     p.add_argument("-a", "--all", action="store_true", help="include done and archived")
+    p.add_argument("-C", "--project", default=None, metavar="DIR",
+                   help="only the tasks of this folder's repository that are not "
+                        "merged yet, with the files their branches change")
 
     p = sub.add_parser("go", help="start working through the queue now")
     p.add_argument("--until", metavar="HH:MM", default=None,
@@ -149,7 +152,43 @@ def cmd_add(args, conn) -> int:
     return 0
 
 
+# How many changed files `list -C` shows per task.
+LIST_FILES = 15
+
+
+def _list_unmerged(folder, conn) -> int:
+    """The tasks of a repository that are not merged yet (the /backlog skill
+    checks these before it adds a task)."""
+    path = Path(folder).expanduser()
+    info = gitops.repo_info(path) if path.is_dir() else None
+    if info is None:
+        print(f"{folder} is not a git repository, so its tasks have no branches.")
+        return 0
+    cards = [t for t in tasks.list_tasks(conn) if t["repo_root"] == info.root]
+    conflicts.annotate(cards)
+    cards = [c for c in cards if not c["merged"]]
+    if not cards:
+        print(f"No tasks of {info.root} are waiting to be merged.")
+        return 0
+    print(f"Not merged yet in {info.root}:")
+    for c in cards:
+        extra = f"  (after {c['after_task']})" if c["after_task"] else ""
+        print(f"  {c['id']:<36} {c['status']:<9} {c['title']}{extra}")
+        if not (c["branch"] and c["base_commit"]
+                and gitops.branch_exists(info.root, c["branch"])):
+            continue
+        files = gitops.changed_names(info.root, c["base_commit"], c["branch"])
+        if files:
+            more = len(files) - LIST_FILES
+            print(f"      changes: {', '.join(files[:LIST_FILES])}"
+                  + (f" and {more} more" if more > 0 else ""))
+    print("Read a task's prompt with: claude-backlog export ID")
+    return 0
+
+
 def cmd_list(args, conn) -> int:
+    if args.project:
+        return _list_unmerged(args.project, conn)
     rows = tasks.list_tasks(conn, include_archived=args.all)
     groups = [("Running", ["running"]), ("Queue", ["queued"]), ("On hold", ["hold"]),
               ("Claude is writing the prompt", ["drafting"]),

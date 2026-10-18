@@ -642,6 +642,8 @@ body.dragging .col-queue.is-empty .empty { display: none; }
   border-radius: var(--r1);
   background: var(--alert-soft);
 }
+div.note-box { display: grid; gap: var(--s2); justify-items: start; margin-bottom: var(--s2); }
+div.note-box p { margin: 0; }
 .copy { display: flex; gap: var(--s2); align-items: center; margin: var(--s3) 0; }
 .copy code {
   flex: 1;
