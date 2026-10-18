@@ -751,6 +751,7 @@ async function openNewTask(status) {
   updateSubmitLabel();
   $("#project-info").textContent = "";
   $("#base-branch-wrap").hidden = true;
+  resetCommit("", false);
   showStep(1);
   let last = "";
   try { last = localStorage.getItem("backlog.lastProject") || ""; } catch (err) { /* private mode */ }
@@ -951,6 +952,7 @@ async function checkProject() {
   const wrap = $("#base-branch-wrap");
   newTask.project = path;
   info.className = "hint";
+  resetCommit(path, false);
   $("#for-project").textContent = path ? `Project: ${tilde(path)}` : "";
   if (!path) { info.textContent = ""; wrap.hidden = true; return false; }
   try {
@@ -975,14 +977,104 @@ async function checkProject() {
     wrap.hidden = !data.branches.length && !after.length;
     info.textContent = `Git repository. The task gets its own branch, starting from ${data.branch || "the current commit"}.`;
     if (data.dirty) {
-      info.textContent += " It has uncommitted changes; they are not part of the task's starting point.";
+      info.textContent += " It has uncommitted changes: they are not part of the task's starting point, and merging the task's branch later can conflict with them.";
       info.className = "hint warn";
+      resetCommit(path, true);
     }
     return true;
   } catch (err) {
     info.textContent = err.message;
     return false;
   }
+}
+
+// --- committing the project's changes first ("Commit now") ---
+
+const commitNow = { path: "", busy: false };
+
+// Shows the "Commit now" button for a repository with changes, closed.
+function resetCommit(path, dirty) {
+  commitNow.path = dirty ? path : "";
+  $("#uncommitted").hidden = !dirty;
+  $("#commit-open").hidden = false;
+  $("#commit-box").hidden = true;
+  $("#commit-message").value = "";
+  $("#commit-error").hidden = true;
+  updateCommitButton();
+}
+
+function updateCommitButton() {
+  $("#commit-submit").disabled = commitNow.busy || !$("#commit-message").value.trim();
+}
+
+function showCommitError(message) {
+  const box = $("#commit-error");
+  box.textContent = message;
+  box.hidden = !message;
+}
+
+async function loadChanges() {
+  const path = commitNow.path;
+  const data = await api("GET", `/api/project-changes?path=${encodeURIComponent(path)}`);
+  if (path !== commitNow.path) return;
+  $("#commit-where").textContent = data.branch
+    ? `"Commit all changes" commits these on ${data.branch}, in ${tilde(data.root)}. Files that .gitignore lists stay out.`
+    : "The repository has no branch checked out (a detached HEAD), so there is no branch to commit on.";
+  const more = data.total - data.files.length;
+  $("#changed-files").innerHTML = data.files.map((f) => `<li title="${esc(f.path)}"><span class="status">${esc(f.status)}</span> ${esc(f.path)}</li>`).join("")
+    + (more > 0 ? `<li class="more">and ${more} more</li>` : "")
+    + (data.total ? "" : '<li class="more">No uncommitted changes are left.</li>');
+}
+
+async function openCommit() {
+  $("#commit-open").hidden = true;
+  $("#commit-box").hidden = false;
+  showCommitError("");
+  $("#commit-where").textContent = "Reading the changes...";
+  $("#changed-files").innerHTML = "";
+  $("#commit-message").focus();
+  try {
+    await loadChanges();
+  } catch (err) {
+    showCommitError(err.message);
+  }
+}
+
+function closeCommit() {
+  $("#commit-box").hidden = true;
+  $("#commit-open").hidden = false;
+  showCommitError("");
+  $("#commit-open").focus();
+}
+
+async function commitChanges() {
+  const message = $("#commit-message").value.trim();
+  if (!message || commitNow.busy) return;
+  const button = $("#commit-submit");
+  commitNow.busy = true;
+  updateCommitButton();
+  button.textContent = "Committing...";
+  showCommitError("");
+  try {
+    const result = await api("POST", "/api/project-commit", { path: commitNow.path, message });
+    toast(`Committed ${result.commit} on ${result.branch}.`);
+    commitNow.busy = false;
+    await checkProject();  // the warning goes away; the branch starts from the new commit
+  } catch (err) {
+    showCommitError(err.message);
+    loadChanges().catch(() => {});
+  } finally {
+    commitNow.busy = false;
+    button.textContent = "Commit all changes";
+    updateCommitButton();
+  }
+}
+
+function setupCommit() {
+  $("#commit-open").addEventListener("click", openCommit);
+  $("#commit-cancel").addEventListener("click", closeCommit);
+  $("#commit-submit").addEventListener("click", commitChanges);
+  $("#commit-message").addEventListener("input", updateCommitButton);
 }
 
 async function projectReady() {
@@ -1116,6 +1208,7 @@ function setupNewTask() {
   const form = $("#new-form");
   const dialog = $("#new-dialog");
   setupPicker();
+  setupCommit();
   $("#new-add").addEventListener("click", addDescribed);
   $("#write-myself").addEventListener("click", writeMyself);
   $("#back").addEventListener("click", () => { showStep(1); form.description.focus(); });
@@ -1124,6 +1217,7 @@ function setupNewTask() {
   form.addEventListener("keydown", (e) => {
     // Enter in a one-line field must not close the form.
     if (e.key === "Enter" && e.target.matches("input:not([type=radio])")) e.preventDefault();
+    if (e.key === "Enter" && e.target.id === "commit-message") commitChanges();
   });
   const discard = (e) => {
     if (formHasWork() && !confirm("Close the form and discard this task?")) e.preventDefault();

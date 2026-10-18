@@ -120,6 +120,23 @@
         </div>
         <small id="project-info" class="hint"></small>
       </div>
+      <section class="uncommitted" id="uncommitted" hidden aria-label="Uncommitted changes">
+        <button class="btn small" id="commit-open" type="button">Commit now</button>
+        <div class="commit-box" id="commit-box" hidden>
+          <p class="hint" id="commit-where"></p>
+          <ul class="changed-files" id="changed-files"></ul>
+          <div class="field">
+            <label for="commit-message">Commit message</label>
+            <input id="commit-message" autocomplete="off" spellcheck="true"
+                   placeholder="What these changes are, in a few words">
+          </div>
+          <p class="form-error" id="commit-error" role="alert" hidden></p>
+          <div class="actions">
+            <button class="btn ghost" id="commit-cancel" type="button">Cancel</button>
+            <button class="btn primary" id="commit-submit" type="button" disabled>Commit all changes</button>
+          </div>
+        </div>
+      </section>
       <div class="field">
         <label for="description">What should Claude do?</label>
         <textarea id="description" name="description" rows="7"

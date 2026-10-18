@@ -593,6 +593,18 @@ dialog.sheet form {
 .picker-empty { padding: 10px; color: var(--muted); font-size: 0.9rem; }
 .picker-foot { margin: 0; padding: 7px 12px; border-top: 1px solid var(--line); font-size: 0.78rem; color: var(--muted); }
 
+/* Committing the project's uncommitted changes from the new task form. */
+.uncommitted { display: grid; gap: 10px; margin-top: -8px; }
+.uncommitted > .btn { justify-self: start; }
+.commit-box { display: grid; gap: 10px; padding: 12px 14px; border-left: 4px solid var(--alert); background: var(--alert-soft); border-radius: 6px; }
+.commit-box .hint { margin: 0; color: var(--ink); overflow-wrap: anywhere; }
+.changed-files { list-style: none; margin: 0; padding: 8px 10px; max-height: 12em; overflow-y: auto; background: var(--ticket); border-radius: 4px; font: 0.8rem/1.5 ui-monospace, "DejaVu Sans Mono", monospace; }
+.changed-files li { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.changed-files .status { display: inline-block; width: 2.5ch; color: var(--muted); white-space: pre; }
+.changed-files .more { color: var(--muted); font-family: var(--font); }
+.commit-box .form-error { white-space: pre-wrap; overflow-wrap: anywhere; }
+.commit-box .actions { flex-wrap: wrap; }
+
 /* Radio buttons shown as one segmented control. */
 .segmented { border: 0; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 0; }
 .segmented legend { padding: 0; margin-bottom: 5px; font-weight: 700; font-size: 0.92rem; color: var(--ink); }
@@ -637,6 +649,7 @@ dialog.sheet form {
   .sheet-foot .actions { flex-wrap: wrap; }
   .sheet-foot .actions .btn.primary { flex: 1 1 100%; order: -1; }
   .sheet-foot .actions .btn:not(.primary) { flex: 1; }
+  .commit-box .actions .btn { flex: 1; }
 }
 
 /* The model input sits under its list when "Other" is chosen. */
