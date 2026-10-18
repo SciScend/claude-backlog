@@ -6,7 +6,8 @@ First version.
 
 - Board in the browser: On hold, Queue (High, Normal, Low), Running, Done and
   Needs attention; drag and drop; task panel with summary, attempts, live
-  log, branch commits and diff; new-task form; settings.
+  log, branch commits and diff; new-task form with a prompt template
+  (editable in Settings); settings.
 - Phone layout with tabs and move buttons; phone access through
   `tailscale serve`, limited to one Tailscale login.
 - Runner: one task at a time through claude-nightshift, each in its own git

@@ -8,7 +8,7 @@ import sqlite3
 import unicodedata
 from pathlib import Path
 
-from claude_backlog import db, gitops, paths
+from claude_backlog import db, gitops, paths, settings
 
 __all__ = [
     "STATUSES",
@@ -128,8 +128,15 @@ def _new_id(conn, title) -> str:
     return f"{slugify(title)}-{number}"
 
 
-def _title_from_prompt(prompt: str) -> str:
+def _headings(text: str) -> set[str]:
+    return {line.strip() for line in text.splitlines() if line.strip().startswith("#")}
+
+
+def _title_from_prompt(prompt: str, skip=frozenset()) -> str:
+    """The first line of the prompt, leaving out the template's own headings."""
     for line in prompt.splitlines():
+        if line.strip() in skip:
+            continue
         line = line.strip().lstrip("#").strip()
         if line:
             return line[:80]
@@ -147,7 +154,8 @@ def create(conn, prompt, project_dir, title=None, priority="normal", status="que
     project = Path(os.path.expanduser(str(project_dir or ""))).resolve()
     if not project_dir or not project.is_dir():
         raise TaskError(f"project folder {project_dir!r} does not exist")
-    title = (title or "").strip() or _title_from_prompt(prompt)
+    skip = _headings(settings.get(conn, "prompt_template"))
+    title = (title or "").strip() or _title_from_prompt(prompt, skip)
     prio = _priority(priority)
     info = gitops.repo_info(project)
     if info and base_branch is None:

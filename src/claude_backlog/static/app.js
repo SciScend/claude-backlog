@@ -547,6 +547,7 @@ async function openNewTask(status) {
   const dialog = $("#new-dialog");
   const form = $("#new-form");
   form.reset();
+  form.prompt.value = state.settings.prompt_template ? state.settings.prompt_template + "\n" : "";
   form.status.value = status || "queued";
   $("#new-error").hidden = true;
   $("#project-info").textContent = "";
@@ -561,7 +562,33 @@ async function openNewTask(status) {
     const all = [...new Set([...projects.recent, ...projects.folders])];
     $("#project-list").innerHTML = all.map((p) => `<option value="${esc(p)}">`).join("");
   } catch (err) { /* suggestions are optional */ }
-  form.prompt.focus();
+  selectHint(form.prompt);
+}
+
+// Focus the prompt with its first hint selected, so typing replaces it.
+function selectHint(field) {
+  const hint = field.value.match(/^<.*>$/m);
+  if (!hint) return field.focus();
+  // Selecting before focusing makes the browser scroll the hint into view.
+  field.blur();
+  field.setSelectionRange(hint.index, hint.index + hint[0].length);
+  field.focus();
+}
+
+// Why the prompt cannot be added yet, or "" when it can.
+function templateProblem(prompt) {
+  const template = state.settings.prompt_template || "";
+  const lines = template.split("\n").map((l) => l.trim());
+  const hints = new Set(lines.filter((l) => /^<.*>$/.test(l)));
+  const headings = new Set(lines.filter((l) => l.startsWith("#")));
+  const left = prompt.split("\n").map((l) => l.trim());
+  const unchanged = left.filter((l) => hints.has(l));
+  if (unchanged.length) {
+    const n = unchanged.length;
+    return `${n} ${n === 1 ? "hint" : "hints"} from the template ${n === 1 ? "is" : "are"} still there. Replace or delete each line in <angle brackets>.`;
+  }
+  if (!left.some((l) => l && !headings.has(l))) return "Write the task in the prompt.";
+  return "";
 }
 
 async function checkProject() {
@@ -606,6 +633,14 @@ function setupNewTask() {
     for (const k of Object.keys(data)) if (data[k] === "") delete data[k];
     if (data.max_attempts) data.max_attempts = Number(data.max_attempts);
     if ($("#base-branch-wrap").hidden) delete data.base_branch;
+    const problem = templateProblem(data.prompt || "");
+    if (problem) {
+      const box = $("#new-error");
+      box.textContent = problem;
+      box.hidden = false;
+      selectHint(form.prompt);
+      return;
+    }
     try {
       const result = await api("POST", "/api/tasks", data);
       try { localStorage.setItem("backlog.lastProject", data.project_dir); } catch (err) { /* private mode */ }
@@ -635,6 +670,7 @@ async function openSettings() {
   form.max_attempts.value = s.max_attempts;
   form.project_roots.value = s.project_roots.join("\n");
   form.tailscale_login.value = s.tailscale_login;
+  form.prompt_template.value = s.prompt_template;
   $("#settings-error").hidden = true;
   const p = state.presence;
   $("#presence-info").textContent = !p ? "" : p.detector
@@ -673,6 +709,7 @@ function setupSettings() {
       max_attempts: Number(form.max_attempts.value),
       project_roots: form.project_roots.value.split("\n").map((s) => s.trim()).filter(Boolean),
       tailscale_login: form.tailscale_login.value,
+      prompt_template: form.prompt_template.value,
     };
     try {
       await api("PUT", "/api/settings", changes);
@@ -684,6 +721,9 @@ function setupSettings() {
       box.textContent = err.message;
       box.hidden = false;
     }
+  });
+  $("#template-reset").addEventListener("click", () => {
+    $("#settings-form").prompt_template.value = state.default_prompt_template;
   });
   $("#meter-mark").addEventListener("click", async () => {
     const value = prompt("Stop the queue when weekly usage reaches (%):", state.settings.threshold);

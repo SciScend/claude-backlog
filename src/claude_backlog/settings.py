@@ -8,7 +8,27 @@ import sqlite3
 
 from claude_backlog import db
 
-__all__ = ["DEFAULTS", "get", "get_all", "update"]
+__all__ = ["DEFAULTS", "PROMPT_TEMPLATE", "get", "get_all", "update"]
+
+PROMPT_TEMPLATE = """\
+## Goal
+<What should exist or work when this is done, in a sentence or two.>
+
+## Context
+<Files, folders, docs and earlier decisions to read first.>
+
+## Steps
+<The order of the work, if it matters. Delete this section if it does not.>
+
+## How to check
+<Commands to run and tests that must pass.>
+
+## Done when
+<The condition that ends the task.>
+
+## Do not
+<What to leave alone: files, APIs, dependencies. Delete if nothing.>
+"""
 
 DEFAULTS = {
     # Stop at this share of the weekly limit (passed to nightshift as -t).
@@ -26,6 +46,9 @@ DEFAULTS = {
     "max_attempts": 3,
     # Folders whose subfolders the new-task form offers as projects.
     "project_roots": [os.path.expanduser("~")],
+    # What the new-task form puts in the prompt field. The lines in angle
+    # brackets are hints; the form does not accept them unchanged.
+    "prompt_template": PROMPT_TEMPLATE,
     # Phone access through tailscale serve: the Tailscale login allowed in.
     "tailscale_login": "",
     "port": 8765,

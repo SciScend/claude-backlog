@@ -200,6 +200,7 @@ def _state(svc: Service) -> dict:
         "usage": svc.usage.get(),
         "presence": svc.watcher.status() if svc.watcher else None,
         "settings": conf,
+        "default_prompt_template": settings.PROMPT_TEMPLATE,
         "warnings": warnings,
         "now": time.time(),
     }

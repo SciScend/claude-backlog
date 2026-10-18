@@ -465,3 +465,4 @@ details .row { margin-top: 10px; }
   .list.drop:empty::after { content: "Empty"; }
   .panel { width: 100%; border-left: 0; }
 }
+#template-reset { justify-self: start; align-self: flex-start; width: auto; }

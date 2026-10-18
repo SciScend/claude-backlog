@@ -189,9 +189,9 @@ Clicking a card opens a side panel:
 
 | Field | Default | Notes |
 |---|---|---|
-| Title | first line of the prompt | |
+| Title | first line of the prompt | headings that come from the prompt template are skipped |
 | Project folder | last used | picked from recent folders and from the project roots in Settings, or typed |
-| Prompt | - | large text field; written as for a person who will not be there |
+| Prompt | the prompt template | large text field; written as for a person who will not be there |
 | Priority | Normal | High / Normal / Low |
 | Put in | Queue | Queue or On hold |
 | Model, effort | from Settings | |
@@ -203,6 +203,15 @@ The form warns when the project folder is not a git repository (the task
 then runs in the folder itself, without a branch, see section 6) and when
 the repository has uncommitted changes (they are not part of the task's
 starting point).
+
+The prompt field opens with the prompt template from Settings: a few
+headings (Goal, Context, Steps, How to check, Done when, Do not) with one
+line in angle brackets under each that says what goes there. The form
+refuses to add the task while a line from the template is still there
+unchanged, so every hint is either replaced or deleted, and while nothing
+but the template's headings is left. An empty template gives an empty
+field. Tasks added from the command line or with `/backlog` do not use the
+template.
 
 "Duplicate" on any card fills the form from that task.
 
@@ -229,6 +238,8 @@ starting point).
   let the current task finish.
 - Defaults for model, effort, windows per attempt, attempts.
 - Project roots for the folder picker (default: the home folder).
+- Prompt template for the new task form (section 3, "New task form"),
+  with a button that restores the default one.
 - Port (default 8765; the Tailscale port is the next one).
 - Phone access: my Tailscale login, the phone address and its QR code.
 

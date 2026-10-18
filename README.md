@@ -76,8 +76,10 @@ it is done.
   job coming, type `/backlog` (optionally with a hint). Claude writes a
   self-contained prompt from the conversation and the code, shows it to you,
   and adds it after your OK.
-- **The board.** Press "New task", pick the project folder, write the
-  prompt, choose a priority.
+- **The board.** Press "New task", pick the project folder, fill in the
+  prompt template (Goal, Context, Steps, How to check, Done when, Do not:
+  replace each hint in angle brackets or delete it), choose a priority.
+  The template can be changed in Settings.
 - **The command line.**
 
   ```bash

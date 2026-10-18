@@ -11,6 +11,16 @@ def test_slugify():
     assert len(tasks.slugify("x" * 100)) == 32
 
 
+def test_title_skips_the_template_headings(conn, plain_dir):
+    prompt = "## Goal\nMake the import page faster.\n\n## Context\nsrc/import/"
+    assert tasks.create(conn, prompt, plain_dir)["title"] == "Make the import page faster."
+    # A heading that is not from the template is still a good title.
+    assert tasks.create(conn, "# Fix the login\nIt fails.", plain_dir)["title"] == \
+        "Fix the login"
+    settings.update(conn, {"prompt_template": ""})
+    assert tasks.create(conn, prompt, plain_dir)["title"] == "Goal"
+
+
 def test_create_in_a_git_repo(conn, repo):
     task = tasks.create(conn, "Do the thing\nin detail", repo, priority="high")
     assert task["id"] == "do-the-thing-1"

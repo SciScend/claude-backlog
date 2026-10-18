@@ -104,8 +104,9 @@
       <small id="project-info" class="hint"></small>
     </label>
     <label>Prompt
-      <textarea name="prompt" rows="10" required
+      <textarea name="prompt" rows="16" required
         placeholder="Write it for someone who cannot ask you anything: the goal, the files involved, how to check the result, and when it is done."></textarea>
+      <small class="hint">Replace each line in &lt;angle brackets&gt; or delete it.</small>
     </label>
     <label>Title <input name="title" placeholder="From the first line of the prompt"></label>
     <div class="row">
@@ -169,6 +170,10 @@
       </div>
       <label>Folders that hold your projects (one per line)
         <textarea name="project_roots" rows="3"></textarea></label>
+      <label>Prompt template for new tasks
+        <textarea name="prompt_template" rows="10"></textarea>
+        <small class="hint">Lines in &lt;angle brackets&gt; are hints: a task cannot be added while one is left unchanged. Leave it empty for an empty prompt field.</small></label>
+      <button class="btn small" id="template-reset" type="button">Restore the default template</button>
     </fieldset>
     <fieldset>
       <legend>Phone</legend>

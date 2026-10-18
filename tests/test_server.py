@@ -57,6 +57,8 @@ def test_state(client):
     data = client.get("/api/state").json()
     assert data["tasks"] == []
     assert data["settings"]["threshold"] == 50.0
+    assert data["settings"]["prompt_template"].startswith("## Goal\n<")
+    assert data["default_prompt_template"] == settings.PROMPT_TEMPLATE
     assert data["usage"]["usage"]["weekly_pct"] == 20.0
 
 
