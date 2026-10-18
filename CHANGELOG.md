@@ -52,3 +52,6 @@ First version.
   states, and amber kept for the running task and the stop threshold only.
 - The project folder picker lists a folder that is reachable under several
   paths through symlinks (say `~/projects` -> `/data/projects`) only once.
+- The usage line in the header reads like the Claude Code statusline:
+  `5h 84% (53m) | 7d 31% (1d20h) | STOP at 50%`, with the time left until
+  each window resets instead of the weekly reset date.

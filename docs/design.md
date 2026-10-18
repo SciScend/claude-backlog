@@ -132,7 +132,7 @@ here):
 
 ```
 +------------------------------------------------------------------------------+
-| Claude Backlog   Week [##########--|-------] 38%  stop at 50%  resets Thu 09:00|
+| Claude Backlog [######--|---]  5h 12% (2h05m) | 7d 38% (3d19h) | STOP at 50% |
 | Idle. Starts when away: ON (15 min)     [New task] [Run now v] [Settings]     |
 +------------------+----------------------+-------------------+-----------------+
 | ON HOLD          | QUEUE                | RUNNING           | DONE            |
@@ -390,7 +390,10 @@ the `/backlog` skill follows it (`claude-backlog template` prints it).
 - **New task** opens the new task form (on the phone, the button at the
   bottom of the screen).
 - **Weekly usage bar** with a marker at the stop threshold. Clicking the
-  threshold changes it (the same setting as in Settings).
+  threshold changes it (the same setting as in Settings). Under it, usage
+  in the form of the Claude Code statusline: `5h 12% (2h05m) | 7d 38%
+  (3d19h) | STOP at 50%`, each window with the time left until it resets;
+  a figure or reset time that nightshift does not report is left out.
 - **Status line**: idle / running (started by me or because I was away) /
   stopped and why.
 - **Starts when away: ON / OFF**, one click to switch. OFF is for days

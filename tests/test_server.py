@@ -65,6 +65,18 @@ def test_state(client):
     assert data["usage"]["usage"]["weekly_pct"] == 20.0
 
 
+def test_usage_from_nightshift_has_both_reset_times(backlog_home):
+    # The header counts down to both resets, so the 5-hour one must come through too.
+    service = Service(runner_=IdleRunner(), port=8765)
+    app = create_app(service)
+    with TestClient(app, base_url=LOCAL) as c:
+        usage = c.post("/api/usage", json={}).json()["usage"]
+    service.close()
+    assert usage["weekly_pct"] == 12.0
+    assert usage["weekly_resets"] == 1792400400.0
+    assert usage["five_hour_pct"] == 3.0
+    assert usage["five_hour_resets"] == 1792243200.0
+
 def test_index_and_static(client):
     assert "Claude Backlog" in client.get("/").text
     assert client.get("/static/app.js").status_code == 200

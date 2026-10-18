@@ -77,6 +77,22 @@ function clock(seconds) {
   return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
+// Time left until a reset, as the Claude Code statusline shows it: "1d20h", "2h05m", "53m".
+function left(seconds) {
+  const min = Math.max(0, Math.ceil(seconds / 60));
+  const h = Math.floor(min / 60);
+  if (h >= 24) return `${Math.floor(h / 24)}d${String(h % 24).padStart(2, "0")}h`;
+  return h ? `${h}h${String(min % 60).padStart(2, "0")}m` : `${min}m`;
+}
+
+// One usage window, e.g. "5h 84% (53m)"; no countdown without a reset time.
+function limit(name, pct, resets, now) {
+  if (pct == null) return null;
+  let s = `${name} <strong>${Math.round(pct)}%</strong>`;
+  if (resets) s += ` (${left(resets - now)})`;
+  return s;
+}
+
 function when(ts) {
   if (!ts) return "";
   const d = new Date(ts * 1000);
@@ -115,10 +131,13 @@ function renderHeader() {
     const pct = usage.usage.weekly_pct;
     fill.style.width = `${Math.min(100, pct)}%`;
     fill.classList.toggle("over", pct >= threshold);
-    let line = `This week <strong>${Math.round(pct)}%</strong> used, stops at ${threshold}%`;
-    if (usage.usage.weekly_resets) line += `, resets ${when(usage.usage.weekly_resets)}`;
-    if (usage.usage.five_hour_pct != null) line += `. 5-hour window ${Math.round(usage.usage.five_hour_pct)}%`;
-    text.innerHTML = line;
+    const u = usage.usage;
+    const now = nowSeconds();
+    text.innerHTML = [
+      limit("5h", u.five_hour_pct, u.five_hour_resets, now),
+      limit("7d", pct, u.weekly_resets, now),
+      `STOP at ${threshold}%`,
+    ].filter(Boolean).join(" | ");
   } else {
     fill.style.width = "0";
     text.textContent = usage.error ? `Usage unknown: ${usage.error}` : "Reading usage...";

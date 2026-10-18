@@ -156,6 +156,10 @@ bar) is passed to claude-nightshift for every task. No new Claude session
 starts once your weekly usage is at or above it. A task can have its own
 limit.
 
+The board header shows usage the way the Claude Code statusline does, with
+the time left until each window resets:
+`5h 12% (2h05m) | 7d 38% (3d19h) | STOP at 50%`.
+
 Each attempt at a task may use two 5-hour windows by default. A task that is
 not finished goes back to its place in the queue and is tried again, up to
 three attempts, after which it needs your attention.
