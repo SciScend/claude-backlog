@@ -321,8 +321,6 @@ def _handler(fn):
             return JSONResponse({"error": str(exc)}, status_code=400)
         except gitops.GitError as exc:
             return JSONResponse({"error": str(exc)}, status_code=409)
-        except draft.DraftError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=422)
         if isinstance(result, Response):
             return result
         return JSONResponse(result)
@@ -346,14 +344,6 @@ def create_task(request, data):
     if task["status"] == "drafting":
         svc.start_draft(task["id"])
     return {"task": task}
-
-
-def write_draft(request, data):
-    conf = settings.get_all(_svc(request).conn())
-    return draft.draft(str(data.get("description") or ""),
-                       str(data.get("project_dir") or ""),
-                       conf["prompt_template"], conf["draft_model"],
-                       conf["draft_effort"])
 
 
 def get_task(request, _):
@@ -703,7 +693,6 @@ def create_app(service: Service, on_shutdown=None) -> Starlette:
         Route("/api/state", h(get_state)),
         Route("/api/events", events),
         Route("/api/tasks", h(create_task), methods=["POST"]),
-        Route("/api/draft", h(write_draft), methods=["POST"]),
         Route("/api/tasks/{task_id}", h(get_task)),
         Route("/api/tasks/{task_id}", h(patch_task), methods=["PATCH"]),
         Route("/api/tasks/{task_id}/move", h(move_task), methods=["POST"]),

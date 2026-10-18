@@ -194,21 +194,6 @@ def test_projects_and_folders(client, tmp_path):
     assert client.get("/api/folders", params={"path": "/no/such"}).json()["folders"] == []
 
 
-def test_draft_endpoint(client, plain_dir, monkeypatch):
-    import sys
-    from pathlib import Path
-
-    fake = Path(__file__).with_name("fake_claude.py")
-    monkeypatch.setenv("CLAUDE_BACKLOG_CLAUDE", f"{sys.executable} {fake}")
-    r = post(client, "/api/draft", {"description": "Make imports fast",
-                                    "project_dir": str(plain_dir)})
-    assert r.status_code == 200, r.text
-    assert r.json()["title"] == "Speed up imports"
-    r = post(client, "/api/draft", {"description": "", "project_dir": str(plain_dir)})
-    assert r.status_code == 422
-    assert "Describe" in r.json()["error"]
-
-
 # --- the prompt drafted in the background ----------------------------------------
 
 

@@ -159,8 +159,23 @@ function statusLine() {
   return line;
 }
 
+// The column a card shows in: a drafting task shows where it will go.
+function column(task) {
+  return task.status === "drafting" ? task.draft_target || "queued" : task.status;
+}
+
+function plural(n, word) {
+  return `${n} ${word}${n === 1 ? "" : "s"}`;
+}
+
 function ticket(task) {
   const meta = [`<span>${esc(task.project_name)}</span>`];
+  if (task.status === "drafting") meta.unshift('<span class="drafting-mark">Claude is writing the prompt</span>');
+  if (task.blocking) meta.push(`<span class="warn">${plural(task.blocking, "question")} to answer before it can run</span>`);
+  else if (task.questions && task.questions.length && !["done", "archived", "drafting"].includes(task.status)) {
+    const open = task.questions.filter((q) => !q.answer).length;
+    if (open) meta.push(`<span>${plural(open, "question")} from Claude</span>`);
+  }
   if (task.model) meta.push(`<span>${esc(task.model)}</span>`);
   if (task.effort) meta.push(`<span>effort ${esc(task.effort)}</span>`);
   if (!task.in_git) meta.push("<span>runs in place, no branch</span>");
@@ -182,6 +197,11 @@ function ticket(task) {
       <button class="btn small" data-move="up">Up</button>
       <button class="btn small" data-move="down">Down</button>
       <button class="btn small" data-move="hold">Hold</button></div>`;
+  } else if (task.status === "hold" && task.draft_error) {
+    moves = `<div class="moves"><button class="btn small" data-move="redraft">Retry the draft</button>
+      <button class="btn small" data-move="write">Write it myself</button></div>`;
+  } else if (task.status === "hold" && task.blocking) {
+    moves = `<div class="moves"><button class="btn small" data-move="answer">Answer</button></div>`;
   } else if (task.status === "hold") {
     moves = `<div class="moves"><button class="btn small" data-move="queue">Queue it</button></div>`;
   } else if (task.status === "attention" || task.status === "done") {
@@ -193,6 +213,7 @@ function ticket(task) {
     <div class="title">${esc(task.title)}${isNew ? '<span class="new">new</span>' : ""}</div>
     <div class="meta">${meta.join("")}</div>
     ${task.note && task.status !== "done" ? `<div class="note">${esc(task.note)}</div>` : ""}
+    ${task.draft_error ? `<div class="note">${esc(task.draft_error)}</div>` : ""}
     ${moves}
   </article>`;
 }
@@ -218,7 +239,7 @@ function renderBoard() {
   for (const list of $$(".list[data-status]")) {
     const status = list.dataset.status;
     const priority = Number(list.dataset.priority || 0);
-    const items = tasks.filter((t) => t.status === status && (status !== "queued" || t.priority === priority));
+    const items = tasks.filter((t) => column(t) === status && (status !== "queued" || t.priority === priority));
     if (status === "done") items.sort((a, b) => (b.finished_at || 0) - (a.finished_at || 0));
     if (status === "attention") items.sort((a, b) => (b.finished_at || b.updated_at) - (a.finished_at || a.updated_at));
     list.innerHTML = items.map(ticket).join("");
@@ -226,8 +247,9 @@ function renderBoard() {
   const running = tasks.filter((t) => t.status === "running");
   $("#running-list").innerHTML = running.map(runningTicket).join("");
   for (const t of tasks) {
-    if (t.status === "queued") counts.queue++;
-    else if (t.status in counts) counts[t.status]++;
+    const col = column(t);
+    if (col === "queued") counts.queue++;
+    else if (col in counts) counts[col]++;
   }
   for (const el of $$("[data-count]")) {
     const key = el.dataset.count;
@@ -278,6 +300,9 @@ async function moveTask(id, how) {
   if (how === "hold") return act(api("POST", `/api/tasks/${id}/action`, { action: "hold" }), "Put on hold.");
   if (how === "queue") return act(api("POST", `/api/tasks/${id}/action`, { action: "queue" }), "Added to the queue.");
   if (how === "retry") return act(api("POST", `/api/tasks/${id}/action`, { action: "retry" }), "Back in the queue.");
+  if (how === "redraft") return act(api("POST", `/api/tasks/${id}/action`, { action: "redraft" }), "Claude is writing the prompt again.");
+  if (how === "write") return openTask(id, "edit");
+  if (how === "answer") return openTask(id);
   const list = siblings(task);
   const index = list.findIndex((t) => t.id === id);
   if (how === "up") {
@@ -410,7 +435,18 @@ function renderPanel() {
   $("#panel-title").textContent = task.title;
   for (const b of $$("#panel-tabs button")) b.classList.toggle("active", b.dataset.tab === openTab);
   const body = $("#panel-body");
-  if (openTab === "overview") body.innerHTML = overviewHtml();
+  if (openTab === "overview") {
+    // Keep answers being typed when the panel is drawn again.
+    const typed = $$("[data-q]", body).filter((el) => el.value !== el.defaultValue)
+      .map((el) => [el.dataset.q, el.value]);
+    const focused = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.q : undefined;
+    body.innerHTML = overviewHtml();
+    for (const [q, value] of typed) {
+      const el = $(`[data-q="${q}"]`, body);
+      if (el) el.value = value;
+    }
+    if (focused !== undefined) { const el = $(`[data-q="${focused}"]`, body); if (el) el.focus(); }
+  }
   if (openTab === "edit" && !body.querySelector("#edit-form[data-id='" + CSS.escape(task.id) + "']")) {
     body.innerHTML = editHtml();
     modelPicker($("#edit-form").model, defaultModelLabel());
@@ -419,15 +455,16 @@ function renderPanel() {
   if (openTab === "changes") renderChanges(body);
 }
 
-const STATUS_NAMES = { hold: "On hold", queued: "In the queue", running: "Running", done: "Done", attention: "Needs attention", archived: "Archived" };
+const STATUS_NAMES = { drafting: "Claude is writing the prompt", hold: "On hold", queued: "In the queue", running: "Running", done: "Done", attention: "Needs attention", archived: "Archived" };
 
 function overviewHtml() {
   const { task, runs, commits } = detail;
   const actions = [];
   if (task.status === "queued") actions.push(["run-next", "Run next"], ["hold", "Put on hold"]);
-  if (task.status === "hold") actions.push(["queue", "Add to the queue"], ["run-next", "Run next"]);
+  if (task.status === "hold" && task.draft_error) actions.push(["redraft", "Retry the draft"], ["write", "Write it myself"]);
+  else if (task.status === "hold") actions.push(["queue", "Add to the queue"], ["run-next", "Run next"]);
   if (task.status === "done" || task.status === "attention") actions.push(["retry", "Run again"]);
-  if (task.status !== "running" && task.status !== "archived") actions.push(["archive", "Archive"]);
+  if (!["running", "archived", "drafting"].includes(task.status)) actions.push(["archive", "Archive"]);
   if (task.status !== "running") actions.push(["delete", "Delete"]);
   const parts = [];
   const after = task.after_title
@@ -436,7 +473,13 @@ function overviewHtml() {
   parts.push(`<section><p>${STATUS_NAMES[task.status]}, ${esc(task.priority_name)} priority. Project <span class="mono">${esc(task.project_dir)}</span>.</p>
     ${after}
     ${task.note ? `<p class="note-box">${esc(task.note)}</p>` : ""}
+    ${task.status === "drafting" ? '<p class="drafting-mark">Claude is writing the prompt from your description. This usually takes 10 to 20 seconds.</p>' : ""}
+    ${task.draft_error ? `<p class="note-box">${esc(task.draft_error)}<br>Retry the draft, or write the prompt yourself.</p>` : ""}
     <div class="actions-bar">${actions.map(([a, label]) => `<button class="btn small${a === "delete" ? " danger" : ""}" data-action="${a}">${label}</button>`).join("")}</div></section>`);
+  if (task.questions && task.questions.length && task.status !== "running") parts.push(questionsHtml(task));
+  if (task.description && (task.status === "drafting" || task.draft_error)) {
+    parts.push(`<section><h3>Your description</h3><pre>${esc(task.description)}</pre></section>`);
+  }
   if (detail.summary_html) parts.push(`<section><h3>What Claude reports (SUMMARY.md)</h3><div class="summary">${detail.summary_html}</div></section>`);
   if (task.branch) {
     parts.push(`<section><h3>Branch</h3>
@@ -466,15 +509,55 @@ function overviewHtml() {
   return parts.join("");
 }
 
+// Claude's questions, each with what the prompt assumes and an answer field.
+function questionsHtml(task) {
+  const held = task.status === "hold" && task.blocking;
+  return `<section class="questions"><h3>Claude's questions</h3>
+    <p class="hint">${held
+      ? "The task waits on hold until the questions marked as blocking are answered."
+      : "The prompt already assumes an answer. Answer the ones you care about; the answers are added to the prompt."}</p>
+    ${task.questions.map((q, i) => `<label class="question">
+      <span>${esc(q.question)}${q.blocking ? ' <span class="tag-block">blocking</span>' : ""}</span>
+      ${q.assumption ? `<small class="hint">Assumed: ${esc(q.assumption)}</small>` : ""}
+      <input data-q="${i}" value="${esc(q.answer || "")}" placeholder="Your answer (optional)" autocomplete="off"></label>`).join("")}
+    <div class="actions-bar"><button class="btn small" data-answers="save">Save answers</button>
+      ${held ? '<button class="btn small primary" data-answers="queue">Save answers and queue it</button>' : ""}</div>
+  </section>`;
+}
+
+async function saveAnswers(queue) {
+  const answers = {};
+  const task = detail.task;
+  for (const el of $$("[data-q]")) {
+    const value = el.value.trim();
+    if (value !== (task.questions[Number(el.dataset.q)].answer || "")) answers[el.dataset.q] = value;
+  }
+  const id = encodeURIComponent(openTaskId);
+  try {
+    if (Object.keys(answers).length) await api("POST", `/api/tasks/${id}/answers`, { answers });
+    if (queue) await api("POST", `/api/tasks/${id}/action`, { action: "queue" });
+    toast(queue ? "Saved and added to the queue." : Object.keys(answers).length ? "Answers saved in the prompt." : "Nothing changed.");
+  } catch (err) {
+    toast(err.message);
+  }
+  $("#panel-body").innerHTML = "";
+  await refresh();
+  await loadDetail();
+}
+
 function editHtml() {
   const t = detail.task;
   const locked = t.status === "running";
+  const drafting = t.status === "drafting";
   const fixed = t.attempts > 0;
+  // A failed draft: start from the template with the description in it.
+  const prompt = t.prompt || (t.description ? templateWith(t.description) : "");
   const opt = (value, label, current) => `<option value="${value}"${String(current ?? "") === value ? " selected" : ""}>${label}</option>`;
   return `<form id="edit-form" data-id="${esc(t.id)}" class="edit">
     ${locked ? '<p class="note-box">The task is running. Stop it to edit.</p>' : ""}
-    <label>Title <input name="title" value="${esc(t.title)}" ${locked ? "disabled" : ""}></label>
-    <label>Prompt <textarea name="prompt" rows="16" ${locked ? "disabled" : ""}>${esc(t.prompt)}</textarea></label>
+    ${drafting ? '<p class="note-box">Claude is writing the prompt. It can be edited once the draft is done.</p>' : ""}
+    <label>Title <input name="title" value="${esc(t.title)}" ${locked || drafting ? "disabled" : ""}></label>
+    <label>Prompt <textarea name="prompt" rows="16" ${locked || drafting ? "disabled" : ""}>${esc(prompt)}</textarea></label>
     <label>Project folder <input name="project_dir" value="${esc(t.project_dir)}" ${locked || fixed ? "disabled" : ""}>
       ${fixed ? '<small class="hint">Fixed once the task has run, because its branch depends on it.</small>' : ""}</label>
     <label>Start after <select name="after_task" ${locked || fixed ? "disabled" : ""}>
@@ -573,6 +656,8 @@ function setupPanel() {
     const action = e.target.closest("[data-action]");
     const copy = e.target.closest("[data-copy]");
     const log = e.target.closest("[data-log]");
+    const answers = e.target.closest("[data-answers]");
+    if (answers) return saveAnswers(answers.dataset.answers === "queue");
     if (copy) {
       try { await navigator.clipboard.writeText(copy.dataset.copy); toast("Copied."); }
       catch (err) { toast("Copy failed; select the text instead."); }
@@ -585,13 +670,26 @@ function setupPanel() {
     }
     if (!action) return;
     const name = action.dataset.action;
+    if (name === "write") {
+      openTab = "edit";
+      $("#panel-body").innerHTML = "";
+      renderPanel();
+      selectHint($("#edit-form").prompt);
+      return;
+    }
     if (name === "delete" && !confirm("Delete this task? Its branch is kept; the task and its history are removed.")) return;
     if (name === "delete-branch" && !confirm("Delete the branch and its worktree? Commits that are not merged are lost.")) return;
-    const messages = { "run-next": "Runs next.", hold: "Put on hold.", queue: "Added to the queue.", retry: "Back in the queue.", archive: "Archived.", delete: "Deleted.", "delete-branch": "Branch deleted." };
+    const messages = { redraft: "Claude is writing the prompt again.", "run-next": "Runs next.", hold: "Put on hold.", queue: "Added to the queue.", retry: "Back in the queue.", archive: "Archived.", delete: "Deleted.", "delete-branch": "Branch deleted." };
     const result = await act(api("POST", `/api/tasks/${encodeURIComponent(openTaskId)}/action`, { action: name }), messages[name]);
     if (!result) return;
     if (name === "delete" || name === "archive") closePanel();
     else loadDetail();
+  });
+  $("#panel-body").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && e.target.matches("[data-q]")) {
+      e.preventDefault();
+      saveAnswers(false);
+    }
   });
   $("#panel-body").addEventListener("submit", async (e) => {
     if (e.target.id !== "edit-form") return;
@@ -603,6 +701,13 @@ function setupPanel() {
       if (String(before ?? "") !== String(v)) changes[k] = v;
     }
     if (!Object.keys(changes).length) return toast("Nothing changed.");
+    const problem = "prompt" in changes ? templateProblem(changes.prompt) : "";
+    if (problem) {
+      const box = $("#edit-error");
+      box.textContent = problem;
+      box.hidden = false;
+      return;
+    }
     try {
       await api("PATCH", `/api/tasks/${encodeURIComponent(openTaskId)}`, changes);
       toast("Saved.");
@@ -619,9 +724,10 @@ function setupPanel() {
 
 // --- new task ---------------------------------------------------------------
 
-// The form has two steps: 1, what to do (project and description); 2, the
-// prompt and the rest. A draft from Claude is ignored once its token is old.
-const newTask = { token: 0, prompt: "", title: "", timer: null, questions: [], project: null };
+// The form has two steps: 1, what to do (project, description and the
+// task's settings), then Add, and Claude writes the prompt in the
+// background; 2, only with "Write it myself": the prompt and the title.
+const newTask = { project: null };
 
 function showStep(step) {
   for (const el of $$("#new-form [data-step]")) el.hidden = el.dataset.step !== String(step);
@@ -639,11 +745,7 @@ function currentStep() {
 async function openNewTask(status) {
   const form = $("#new-form");
   form.reset();
-  newTask.token += 1;  // a draft still being written belongs to the old form
-  Object.assign(newTask, { prompt: "", title: "", project: null });
-  setDrafting(false);
-  setDraftStatus("");
-  renderQuestions([]);
+  newTask.project = null;
   form.status.value = status || "queued";
   modelPicker(form.model, defaultModelLabel());
   updateSubmitLabel();
@@ -665,7 +767,7 @@ async function openNewTask(status) {
 
 function updateSubmitLabel() {
   const hold = $("#new-form").status.value === "hold";
-  $("#new-submit").textContent = hold ? "Put on hold" : "Add to the queue";
+  for (const id of ["#new-add", "#new-submit"]) $(id).textContent = hold ? "Put on hold" : "Add to the queue";
 }
 
 // Unsaved work in the form, so closing it asks first.
@@ -916,101 +1018,23 @@ function selectHint(field) {
 
 // --- writing the prompt ---
 
-function setDraftStatus(message, kind) {
-  const el = $("#draft-status");
-  el.textContent = message;
-  el.className = `draft-status ${kind || ""}`;
-  el.hidden = !message;
-}
-
-function setDrafting(on) {
-  $("#draft-button").disabled = on;
-  $("#redraft").disabled = on;
-  $("#draft-button").textContent = on ? "Claude is writing..." : "Write the prompt with Claude";
-  clearInterval(newTask.timer);
-  if (!on) return;
-  const started = Date.now();
-  const tick = () => {
-    const s = Math.round((Date.now() - started) / 1000);
-    setDraftStatus(`Claude is reading the project and writing the prompt (${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}). This usually takes a minute or two.`, "busy");
-  };
-  tick();
-  newTask.timer = setInterval(tick, 1000);
-}
-
-function renderQuestions(questions) {
-  newTask.questions = questions;
-  $("#questions").hidden = !questions.length;
-  $("#question-list").innerHTML = questions.map((q, i) => `<label class="question">
-      <span>${esc(q.question)}</span>
-      <input data-answer="${i}" placeholder="Your answer (optional)" autocomplete="off"></label>`).join("");
-}
-
-async function writeDraft(withAnswers) {
-  const form = $("#new-form");
-  showError("");
-  if (!(await projectReady())) return;
-  let description = form.description.value.trim();
-  if (!description) {
-    showStep(1);
-    showError("Describe the task first, in a few sentences.");
-    form.description.focus();
-    return;
+// The prompt template with the description in place of its first hint.
+function templateWith(description) {
+  const template = state.settings.prompt_template || "";
+  let text = template ? template.trimEnd() + "\n" : "";
+  description = (description || "").trim();
+  if (description) {
+    const hint = text.match(/^<.*>$/m);
+    text = hint ? text.replace(hint[0], () => description) : `${description}\n${text ? "\n" + text : ""}`;
   }
-  if (withAnswers) {
-    const answered = $$("[data-answer]")
-      .map((el) => [newTask.questions[Number(el.dataset.answer)].question, el.value.trim()])
-      .filter(([, answer]) => answer);
-    if (!answered.length) return showError("Answer at least one question first.");
-    description += "\n\nAnswers to your earlier questions:\n"
-      + answered.map(([q, a]) => `- ${q}\n  ${a}`).join("\n");
-  }
-  const current = form.prompt.value.trim();
-  const untouched = [(state.settings.prompt_template || "").trim(), newTask.prompt.trim(), ""];
-  if (!untouched.includes(current) && !confirm("Replace the prompt you wrote with Claude's draft?")) return;
-  const token = ++newTask.token;
-  setDrafting(true);
-  try {
-    const result = await api("POST", "/api/draft", { description, project_dir: form.project_dir.value.trim() });
-    if (token !== newTask.token) return;
-    form.prompt.value = result.prompt;
-    newTask.prompt = result.prompt;
-    const title = form.title.value.trim();
-    if (result.title && (!title || title === newTask.title)) {
-      form.title.value = result.title;
-      newTask.title = result.title;
-    }
-    renderQuestions(result.questions);
-    showStep(2);
-    form.prompt.scrollTop = 0;
-    $('#new-form .sheet-body[data-step="2"]').scrollTop = 0;
-    setDraftStatus(result.questions.length
-      ? "Draft ready. Claude's questions are above the prompt."
-      : "Draft ready. Read it, change what you like, and add it.", "ok");
-  } catch (err) {
-    if (token === newTask.token) setDraftStatus(err.message, "warn");
-  } finally {
-    if (token === newTask.token) setDrafting(false);
-  }
+  return text;
 }
 
 async function writeMyself() {
   const form = $("#new-form");
   showError("");
   if (!(await projectReady())) return;
-  newTask.token += 1;  // a draft still being written is no longer wanted
-  setDrafting(false);
-  setDraftStatus("");
-  if (!form.prompt.value.trim()) {
-    const template = state.settings.prompt_template || "";
-    const description = form.description.value.trim();
-    let text = template ? template.trimEnd() + "\n" : "";
-    if (description) {
-      const hint = text.match(/^<.*>$/m);
-      text = hint ? text.replace(hint[0], () => description) : `${description}\n${text ? "\n" + text : ""}`;
-    }
-    form.prompt.value = text;
-  }
+  if (!form.prompt.value.trim()) form.prompt.value = templateWith(form.description.value);
   showStep(2);
   selectHint(form.prompt);
 }
@@ -1031,7 +1055,8 @@ function templateProblem(prompt) {
   return "";
 }
 
-async function addTask() {
+// The task's settings from the form, ready to send.
+function formData() {
   const form = $("#new-form");
   const data = Object.fromEntries(new FormData(form).entries());
   for (const k of Object.keys(data)) if (data[k] === "") delete data[k];
@@ -1041,6 +1066,41 @@ async function addTask() {
     data.after_task = data.base_branch.slice("after:".length);
     delete data.base_branch;
   }
+  return data;
+}
+
+async function createTask(data, message) {
+  try {
+    await api("POST", "/api/tasks", data);
+    try { localStorage.setItem("backlog.lastProject", data.project_dir); } catch (err) { /* private mode */ }
+    $("#new-dialog").close();
+    toast(message);
+    await refresh();
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+// Add from step 1: Claude writes the prompt in the background.
+async function addDescribed() {
+  const form = $("#new-form");
+  showError("");
+  if (!(await projectReady())) return;
+  const data = formData();
+  delete data.prompt;
+  delete data.title;
+  if (!data.description) {
+    showError("Describe the task first, in a few sentences.");
+    form.description.focus();
+    return;
+  }
+  await createTask(data, "Added. Claude is writing the prompt.");
+}
+
+// Add from step 2: the prompt written by hand.
+async function addTask() {
+  const form = $("#new-form");
+  const data = formData();
   delete data.description;
   const problem = templateProblem(data.prompt || "");
   if (problem) {
@@ -1048,16 +1108,7 @@ async function addTask() {
     selectHint(form.prompt);
     return;
   }
-  try {
-    const result = await api("POST", "/api/tasks", data);
-    try { localStorage.setItem("backlog.lastProject", data.project_dir); } catch (err) { /* private mode */ }
-    newTask.token += 1;
-    $("#new-dialog").close();
-    toast(data.status === "hold" ? `Put "${result.task.title}" on hold.` : `Added "${result.task.title}" to the queue.`);
-    await refresh();
-  } catch (err) {
-    showError(err.message);
-  }
+  await createTask(data, data.status === "hold" ? "Put on hold." : "Added to the queue.");
 }
 
 function setupNewTask() {
@@ -1065,8 +1116,7 @@ function setupNewTask() {
   const form = $("#new-form");
   const dialog = $("#new-dialog");
   setupPicker();
-  $("#draft-button").addEventListener("click", () => writeDraft(false));
-  $("#redraft").addEventListener("click", () => writeDraft(true));
+  $("#new-add").addEventListener("click", addDescribed);
   $("#write-myself").addEventListener("click", writeMyself);
   $("#back").addEventListener("click", () => { showStep(1); form.description.focus(); });
   $("#new-submit").addEventListener("click", addTask);
@@ -1074,15 +1124,9 @@ function setupNewTask() {
   form.addEventListener("keydown", (e) => {
     // Enter in a one-line field must not close the form.
     if (e.key === "Enter" && e.target.matches("input:not([type=radio])")) e.preventDefault();
-    if (e.key === "Enter" && e.target.matches("[data-answer]")) writeDraft(true);
   });
   const discard = (e) => {
-    if (formHasWork() && !confirm("Close the form and discard this task?")) {
-      e.preventDefault();
-      return;
-    }
-    newTask.token += 1;
-    setDrafting(false);
+    if (formHasWork() && !confirm("Close the form and discard this task?")) e.preventDefault();
   };
   dialog.addEventListener("cancel", (e) => {
     if (!$("#picker-pop").hidden) { e.preventDefault(); closePicker(); return; }
@@ -1103,6 +1147,8 @@ async function openSettings() {
   form.model.value = s.model;
   modelPicker(form.model, "Claude's default");
   form.effort.value = s.effort;
+  form.draft_model.value = s.draft_model;
+  form.draft_effort.value = s.draft_effort;
   form.max_windows.value = s.max_windows;
   form.max_attempts.value = s.max_attempts;
   form.project_roots.value = s.project_roots.join("\n");
@@ -1142,6 +1188,8 @@ function setupSettings() {
       on_return: form.on_return.value,
       model: form.model.value,
       effort: form.effort.value,
+      draft_model: form.draft_model.value,
+      draft_effort: form.draft_effort.value,
       max_windows: form.max_windows.value,
       max_attempts: Number(form.max_attempts.value),
       project_roots: form.project_roots.value.split("\n").map((s) => s.trim()).filter(Boolean),

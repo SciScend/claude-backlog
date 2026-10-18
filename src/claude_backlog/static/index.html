@@ -103,7 +103,7 @@
       <h2 id="new-heading">New task</h2>
       <ol class="steps" aria-label="Steps">
         <li data-step-mark="1" class="current">What to do</li>
-        <li data-step-mark="2">Check the prompt</li>
+        <li data-step-mark="2">Write the prompt</li>
       </ol>
     </header>
 
@@ -124,26 +124,7 @@
         <label for="description">What should Claude do?</label>
         <textarea id="description" name="description" rows="7"
           placeholder="In your own words. For example: the import page is slow with big files; make it faster without changing the file format."></textarea>
-      </div>
-    </div>
-
-    <div class="sheet-body" data-step="2" hidden>
-      <p class="for-project" id="for-project"></p>
-      <section class="questions" id="questions" hidden>
-        <h3>Claude has questions</h3>
-        <p class="hint">The draft below already assumes an answer. Answer the ones you care about and rewrite, or leave them.</p>
-        <div id="question-list"></div>
-        <button class="btn" id="redraft" type="button">Rewrite with my answers</button>
-      </section>
-      <div class="field grow">
-        <label for="prompt">Prompt</label>
-        <textarea id="prompt" name="prompt" rows="16"
-          placeholder="Write it for someone who cannot ask you anything: the goal, the files involved, how to check the result, and when it is done."></textarea>
-        <small class="hint" id="prompt-hint">Replace each line in &lt;angle brackets&gt; or delete it.</small>
-      </div>
-      <div class="field">
-        <label for="title">Title</label>
-        <input id="title" name="title" placeholder="From the first line of the prompt">
+        <small class="hint">After Add, Claude writes the prompt from this in the background, usually in 10 to 20 seconds. You can read and change it on the card.</small>
       </div>
       <div class="row">
         <fieldset class="segmented">
@@ -176,13 +157,26 @@
       </details>
     </div>
 
+    <div class="sheet-body" data-step="2" hidden>
+      <p class="for-project" id="for-project"></p>
+      <div class="field grow">
+        <label for="prompt">Prompt</label>
+        <textarea id="prompt" name="prompt" rows="16"
+          placeholder="Write it for someone who cannot ask you anything: the goal, the files involved, how to check the result, and when it is done."></textarea>
+        <small class="hint" id="prompt-hint">Replace each line in &lt;angle brackets&gt; or delete it.</small>
+      </div>
+      <div class="field">
+        <label for="title">Title</label>
+        <input id="title" name="title" placeholder="From the first line of the prompt">
+      </div>
+    </div>
+
     <footer class="sheet-foot">
-      <p class="draft-status" id="draft-status" aria-live="polite" hidden></p>
       <p class="form-error" id="new-error" hidden></p>
       <div class="actions" data-step="1">
         <button class="btn ghost" value="cancel" type="submit">Cancel</button>
         <button class="btn" id="write-myself" type="button">Write it myself</button>
-        <button class="btn primary" id="draft-button" type="button">Write the prompt with Claude</button>
+        <button class="btn primary" id="new-add" type="button">Add to the queue</button>
       </div>
       <div class="actions" data-step="2" hidden>
         <button class="btn ghost back" id="back" type="button">Back</button>
@@ -222,6 +216,17 @@
         <label>5-hour windows per attempt <input name="max_windows"></label>
         <label>Attempts <input name="max_attempts" type="number" min="1"></label>
       </div>
+      <div class="row">
+        <label>Model for writing prompts
+          <select name="draft_model"><option value="sonnet">Sonnet</option>
+            <option value="haiku">Haiku</option><option value="opus">Opus</option>
+            <option value="">Claude Code's default</option></select></label>
+        <label>Effort for writing prompts
+          <select name="draft_effort"><option value="">Claude Code's default</option>
+            <option>low</option><option>medium</option><option>high</option>
+            <option>xhigh</option><option>max</option></select></label>
+      </div>
+      <small class="hint">Used when Claude writes a task's prompt from your description; the model and effort above are for the runs.</small>
       <label>Folders that hold your projects (one per line)
         <textarea name="project_roots" rows="3"></textarea>
         <small class="hint">The folder picker offers the projects up to two levels below these, and next to projects you used before.</small></label>

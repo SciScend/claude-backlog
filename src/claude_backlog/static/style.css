@@ -544,22 +544,21 @@ dialog.sheet form {
 #prompt { min-height: 18em; font-size: 0.92rem; }
 .for-project { margin: 0; color: var(--muted); font-size: 0.88rem; overflow-wrap: anywhere; }
 
-.draft-status { margin: 0; font-size: 0.9rem; color: var(--muted); }
-.draft-status.busy { color: var(--ink); display: flex; gap: 10px; align-items: center; }
-.draft-status.busy::before {
+/* A task whose prompt Claude is writing. */
+.ticket.drafting { border-style: dashed; }
+.drafting-mark { display: inline-flex; gap: 8px; align-items: center; color: var(--ink); }
+.drafting-mark::before {
   content: "";
   flex: none;
-  width: 14px;
-  height: 14px;
+  width: 11px;
+  height: 11px;
   border: 2px solid var(--line);
   border-top-color: var(--work);
   border-radius: 50%;
   animation: spin 0.9s linear infinite;
 }
-.draft-status.ok { color: var(--done); }
-.draft-status.warn { color: var(--alert); }
 @keyframes spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .draft-status.busy::before { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .drafting-mark::before { animation: none; } }
 
 /* The project folder picker. */
 .picker { position: relative; }
@@ -609,9 +608,8 @@ dialog.sheet form {
 .questions { display: grid; gap: 10px; padding: 14px 16px; border-left: 4px solid var(--work); background: var(--work-soft); border-radius: 6px; }
 .questions h3 { font-size: 0.98rem; }
 .questions .hint { margin: 0; }
-.questions .btn { justify-self: start; }
-#question-list { display: grid; gap: 12px; }
-.question { color: var(--ink); gap: 5px; }
+.question { display: grid; color: var(--ink); gap: 5px; }
+.tag-block { font-size: 0.72rem; color: var(--alert); border: 1px solid currentColor; border-radius: 8px; padding: 0 6px; font-weight: 600; }
 
 /* On the phone: a button at the bottom for a new task. */
 .fab {
