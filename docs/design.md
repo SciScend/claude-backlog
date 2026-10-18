@@ -246,7 +246,24 @@ Arrow keys move, Enter picks, Esc closes. Under the field the form says
 whether the folder is a git repository (the task gets its own branch) or
 not (it then runs in the folder itself, without a branch, see section 6),
 and warns when the repository has uncommitted changes (they are not part
-of the task's starting point).
+of the task's starting point, and merging the task's branch later can
+conflict with them).
+
+The warning offers **Commit now**, so I can deal with them while I am
+there to see what gets committed. It opens the list of changed files
+(from `git status --porcelain`; the first 50, then "and N more") and a
+commit message field that starts empty; the commit button stays disabled
+while the message is empty, so nothing is committed with a text I did not
+write. The commit takes all changes (`git add -A`, which respects
+`.gitignore`) on the branch the repository has checked out, with my own
+git identity and with the repository's hooks running. Afterwards the form
+reads the project again: the warning goes away and the task's branch
+starts from the new commit. Errors are shown in the form in plain words:
+a hook that failed (with its output), no git identity (with the command
+to set one), nothing left to commit, or a detached HEAD (no branch to
+commit on; the board does not guess). Only the project folder's own
+repository is committed, never pushed, and only when I press the button;
+a task itself never commits my checkout.
 
 **2. Write the prompt** (only with Write it myself): the prompt and the
 title (by default the first line of the prompt; headings that come from
@@ -734,12 +751,19 @@ three ways, from most to least help:
    project (goal, files, how to check the result, what not to touch), shows
    it with the proposed title, priority and folder, and on my OK runs
    `claude-backlog add`. When the task builds on another task of the same
-   project that is not merged yet, it adds `--after <id>`. The skill ships
-   with the tool and is installed by `claude-backlog install`.
+   project that is not merged yet, it adds `--after <id>`. Before the
+   proposal it runs `git -C <project folder> status --porcelain`; when the
+   repository has uncommitted changes, the proposal says so and offers to
+   commit them first, with the list of files and a proposed message. It
+   commits only after my OK, and never as part of the task's prompt. The
+   skill ships with the tool and is installed by `claude-backlog install`.
 2. **The board's form** (section 3): a description in my own words, and
    Claude writes the prompt in the background.
 3. **CLI**: `claude-backlog add -C ~/projects/acme-app -p high "prompt"`,
-   `add task.md`, or `add -` to read the prompt from stdin.
+   `add task.md`, or `add -` to read the prompt from stdin. When the
+   project's repository has uncommitted changes, `add` prints a one-line
+   note on stderr (they are not part of the task's starting point); the
+   task is still added and the exit code does not change.
 
 ## 8. Results
 
