@@ -55,3 +55,6 @@ First version.
 - The usage line in the header reads like the Claude Code statusline:
   `5h 84% (53m) | 7d 31% (1d20h) | STOP at 50%`, with the time left until
   each window resets instead of the weekly reset date.
+- The board page links `app.js` and `style.css` with a hash of their
+  content, so a browser that still has the old files loads the new ones
+  after an update.

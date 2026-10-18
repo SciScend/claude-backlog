@@ -1,10 +1,11 @@
+import hashlib
 import time
 
 import pytest
 from starlette.testclient import TestClient
 
 from claude_backlog import settings, tasks
-from claude_backlog.server import MAX_CHANGED_FILES, Service, create_app
+from claude_backlog.server import MAX_CHANGED_FILES, STATIC, Service, create_app
 from conftest import git
 
 LOCAL = "http://127.0.0.1:8765"
@@ -80,6 +81,16 @@ def test_usage_from_nightshift_has_both_reset_times(backlog_home):
 def test_index_and_static(client):
     assert "Claude Backlog" in client.get("/").text
     assert client.get("/static/app.js").status_code == 200
+
+
+def test_index_links_versioned_static_files(client):
+    # A browser that cached the old app.js or style.css must load the new ones.
+    page = client.get("/")
+    assert page.headers["cache-control"] == "no-store"
+    for name in ("app.js", "style.css"):
+        digest = hashlib.sha256((STATIC / name).read_bytes()).hexdigest()[:12]
+        assert f'"/static/{name}?v={digest}"' in page.text
+        assert client.get(f"/static/{name}?v={digest}").status_code == 200
 
 
 def test_create_move_and_act(client, plain_dir):

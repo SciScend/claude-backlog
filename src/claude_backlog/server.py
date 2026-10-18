@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import datetime
+import hashlib
 import json
 import logging
 import os
@@ -19,7 +20,7 @@ from markdown_it import MarkdownIt
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import (
-    FileResponse,
+    HTMLResponse,
     JSONResponse,
     PlainTextResponse,
     Response,
@@ -708,8 +709,18 @@ async def events(request: Request):
                              headers={"Cache-Control": "no-store"})
 
 
+def _versioned(html: str) -> str:
+    """Add a content hash to the script and style links, so a browser that cached
+    the old files loads the new ones after an update."""
+    for name in ("app.js", "style.css"):
+        digest = hashlib.sha256((STATIC / name).read_bytes()).hexdigest()[:12]
+        html = html.replace(f'"/static/{name}"', f'"/static/{name}?v={digest}"')
+    return html
+
+
 async def index(request):
-    return FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-store"})
+    html = _versioned((STATIC / "index.html").read_text(encoding="utf-8"))
+    return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
 
 # --- access control ------------------------------------------------------------
