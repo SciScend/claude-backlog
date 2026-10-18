@@ -16,8 +16,9 @@ from pathlib import Path
 def main():
     args = sys.argv[1:]
     if "--usage-json" in args:
-        print(json.dumps({"weekly_pct": 12.0, "weekly_resets": None, "five_hour_pct": 3.0,
-                          "five_hour_resets": None, "source": "fake", "observed_at": 1.0}))
+        print(json.dumps({"weekly_pct": 12.0, "weekly_resets": 1792400400.0,
+                          "five_hour_pct": 3.0, "five_hour_resets": 1792243200.0,
+                          "source": "fake", "observed_at": 1.0}))
         return 0
     calls = Path(os.environ["FAKE_NS_CALLS"])
     with calls.open("a") as f:
