@@ -288,6 +288,7 @@ everything around it: the queue, the board, starting and stopping, worktrees
 and reports. It never decides anything from usage figures itself.
 
 The design is in [docs/design.md](docs/design.md).
+A detailed user guide in Bulgarian is in [docs/guide.bg.md](docs/guide.bg.md).
 
 ## Development
 
