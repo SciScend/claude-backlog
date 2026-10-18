@@ -7,9 +7,15 @@ First version.
 - Board in the browser: On hold, Queue (High, Normal, Low), Running, Done and
   Needs attention; drag and drop; task panel with summary, attempts, live
   log, branch commits and diff; a two-step new-task form with a project
-  folder picker, a prompt template (editable in Settings) and "Write the
-  prompt with Claude", which drafts the prompt from a short description;
-  settings.
+  folder picker and a prompt template (editable in Settings); settings.
+- Add a task from a short description: it is on the board at once while
+  Claude drafts the prompt in the background in one tool-less call, with
+  an outline of the project gathered without a model (file list, README,
+  CLAUDE.md, build and test commands, matching files; cached per git HEAD).
+  The draft model and effort are their own settings (default Sonnet, low
+  effort). Claude's questions come with the assumption the prompt makes;
+  only a blocking question holds the task, answers go into the prompt
+  without a new call, and a failed draft can be retried or written by hand.
 - Phone layout with tabs and move buttons; phone access through
   `tailscale serve`, limited to one Tailscale login.
 - Runner: one task at a time through claude-nightshift, each in its own git

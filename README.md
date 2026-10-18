@@ -77,13 +77,20 @@ it is done.
   self-contained prompt from the conversation and the code, shows it to you,
   and adds it after your OK.
 - **The board.** Press "New task", pick the project folder (type to search
-  your projects, or type a path), and say in a few sentences of your own
-  what Claude should do. Press **Write the prompt with Claude**: Claude
-  reads the project (read-only) and writes the full prompt, with real paths
-  and the project's own test commands, in a minute or two. If something
-  important is open it lists questions above the prompt; answer them and
-  rewrite, or leave them. Or press "Write it myself" and fill in the prompt
-  template. Then check the prompt, choose a priority and add the task.
+  your projects, or type a path), say in a few sentences of your own what
+  Claude should do, choose a priority, and press **Add**. The task is on
+  the board at once, marked "drafting", while Claude writes the full prompt
+  in the background, usually in 10 to 20 seconds: one call (Sonnet at low
+  effort by default; see Settings) with an outline of the project that the
+  board gathers itself (the file list, README, CLAUDE.md, the build and
+  test commands, and the files that match your description), so the prompt
+  has real paths and the project's own test commands. Where your
+  description leaves something open, the prompt makes an assumption, and
+  the card lists the question with that assumption; answering is optional
+  and adds your answer to the prompt. Only when a question blocks the task
+  (for example goals that contradict each other) does it wait on hold for
+  your answer. You can read and change the prompt on the card. Or press
+  "Write it myself" and fill in the prompt template.
 - **The command line.**
 
   ```bash
@@ -195,8 +202,9 @@ mind when you write tasks.
 - Each task works in a separate git worktree on its own branch. Claude is
   told not to push, merge or touch anything outside the worktree and its
   task folder, and the branch is only merged when you do it.
-- "Write the prompt with Claude" runs Claude in the project folder with
-  read-only tools (Read, Grep, Glob) and nothing else.
+- When Claude writes a task's prompt on the board, it gets no tools and
+  no MCP servers (`--tools ""`, `--strict-mcp-config`): it only reads the
+  outline of the project that the board puts in the request.
 - The board listens on `127.0.0.1` only and refuses requests from other web
   pages, because anyone who can use it can make Claude run commands.
 - Phone access goes through `tailscale serve` to your own devices, and only
