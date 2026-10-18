@@ -155,7 +155,8 @@ drop zones ("Drag a task here") show only while a card is being dragged.
 ### Columns
 
 - **On hold**: tasks that exist but must not run yet (drafts, waiting for
-  something). The new task form can put a task here.
+  something, or waiting for an answer to a blocking question). The new
+  task form can put a task here.
 - **Queue**: what will run, in the order shown, top first. A task marked
   "waits for ..." is skipped until the task it starts after is done
   (section 6, "Tasks on the same project"). It has three priority groups:
@@ -171,6 +172,10 @@ drop zones ("Drag a task here") show only while a card is being dragged.
 - **Needs attention**: failed tasks, and tasks deferred more often than
   their limit allows.
 
+A task whose prompt Claude is still writing shows in the column it will
+go to, marked "drafting"; it cannot be dragged until the draft is done
+(section 3, "New task form").
+
 Dragging between columns: On hold <-> Queue; Done or Needs attention ->
 Queue means "run it again" (on the same branch, with the same or an edited
 prompt).
@@ -182,10 +187,16 @@ effort when they differ from the defaults, and attempts so far. A task that
 starts after another one says so ("waits for ..." until that task is
 done). A finished task's card says when its branch is already merged, and
 warns when it would conflict with its base branch or with another
-finished task's branch (section 6, "Tasks on the same project").
+finished task's branch (section 6, "Tasks on the same project"). While
+Claude writes the prompt the card says "drafting"; when the draft failed
+it shows the error, and when Claude asked questions it shows how many and
+whether one blocks the task.
 
 Clicking a card opens a side panel:
 
+- after a draft, Claude's questions with their assumptions and an answer
+  field each; after a failed draft, the error with "Retry the draft" and
+  "Write it myself";
 - the prompt and all settings, editable while the task is not running;
 - `SUMMARY.md` rendered, when there is one;
 - the branch: name, base commit, list of commits, changed files with a
@@ -198,12 +209,24 @@ Clicking a card opens a side panel:
 
 ### New task form
 
-The form has two steps, so the first thing it asks is what I want, not a
-page of fields.
+The form asks first what I want, not for a page of fields, and does not
+make me wait for Claude.
 
 **1. What should Claude do?** The project folder and, in my own words,
-what the task is. Then either "Write the prompt with Claude" (below) or
-"Write it myself"; both go to step 2.
+what the task is, then the task's settings:
+
+| Field | Default | Notes |
+|---|---|---|
+| Priority | Normal | High / Normal / Low |
+| Put in | Queue | Queue or On hold: where the task goes once its prompt is written |
+| Start from | the project's current branch | a branch (the task's branch starts from its latest commit), or "after" another task of the same repository (section 6, "Tasks on the same project") |
+| Model, effort | from Settings | folded away; the model is chosen from a list: Opus, Sonnet, Haiku, Fable (the aliases `claude --model` takes, each the latest version; Fable notes that some plans need usage credits for it), or Other for a full model name |
+| Windows per attempt | from Settings (2) | folded away; how many 5-hour windows one attempt may use (nightshift `-w`) |
+| Attempts | 3 | folded away; how many times a deferred task is retried before it needs attention |
+
+Then either **Add** or **Write it myself**. Add creates the task at once,
+in the "drafting" state, and closes the form; Claude writes the prompt in
+the background (below). Write it myself goes to step 2.
 
 The project folder is the board's own picker, not the browser's
 suggestion list (which cannot be styled and scrolls too fast). Typing
@@ -225,21 +248,11 @@ not (it then runs in the folder itself, without a branch, see section 6),
 and warns when the repository has uncommitted changes (they are not part
 of the task's starting point).
 
-**2. Check the prompt.** The prompt, then the rest:
-
-| Field | Default | Notes |
-|---|---|---|
-| Prompt | Claude's draft, or the prompt template | large text field; written as for a person who will not be there |
-| Title | Claude's title, or the first line of the prompt | headings that come from the prompt template are skipped |
-| Priority | Normal | High / Normal / Low |
-| Put in | Queue | Queue or On hold |
-| Start from | the project's current branch | a branch (the task's branch starts from its latest commit), or "after" another task of the same repository (section 6, "Tasks on the same project") |
-| Model, effort | from Settings | folded away; the model is chosen from a list: Opus, Sonnet, Haiku, Fable (the aliases `claude --model` takes, each the latest version; Fable notes that some plans need usage credits for it), or Other for a full model name |
-| Windows per attempt | from Settings (2) | folded away; how many 5-hour windows one attempt may use (nightshift `-w`) |
-| Attempts | 3 | folded away; how many times a deferred task is retried before it needs attention |
-
-"Back" returns to step 1 without losing anything. The buttons stay at the
-bottom of the form at all times; on the phone the form fills the screen.
+**2. Write the prompt** (only with Write it myself): the prompt and the
+title (by default the first line of the prompt; headings that come from
+the prompt template are skipped). "Back" returns to step 1 without losing
+anything. The buttons stay at the bottom of the form at all times; on the
+phone the form fills the screen.
 
 With "Write it myself" the prompt field opens with the prompt template
 from Settings: a few headings with one line in angle brackets under each
@@ -267,22 +280,69 @@ Rules that hold for every task (no questions, STATE.md, small checked
 steps, not weakening tests, SUMMARY.md) are in the preamble (section 6),
 not in the template.
 
-**Write the prompt with Claude.** It runs `claude -p` in the project
-folder with read-only tools (Read, Grep, Glob; `--permission-mode
-dontAsk`) and a structured answer: the prompt, written to the template
-from the actual code (real paths, the project's own build and test
-commands), a title, and up to five questions where my description leaves a
-choice open that matters. Step 1 shows that Claude is reading the project
-and for how long; "Write it myself" stays available meanwhile. The draft
-fills step 2. Claude's questions are listed above the prompt, each with an
-answer field; "Rewrite with my answers" sends the description with the
-answered questions for a new draft (unanswered ones keep the assumption
-the draft states). This takes a minute or two and uses a little of the
-normal Claude usage; it is something I start, so the queue's threshold
-does not apply. It calls `claude` directly, not nightshift: it is one
-short session with no usage logic. Tasks added from the command line do
-not use the template; the `/backlog` skill follows it (`claude-backlog
-template` prints it).
+**Claude writes the prompt in the background.** After Add, the service
+drafts the prompt from the description in about 10 to 20 seconds, while
+the card is on the board with a "drafting" mark (in the column chosen
+under "Put in"). A drafting task is never started by the runner: it has
+its own status, `drafting`, and the queue only takes `queued` tasks; it
+cannot be moved or have its prompt edited until the draft is done. It is
+fast because the draft is one model call, not an agent session that reads
+the project file by file:
+
+1. **Project pack**, built in Python without a model: the file list
+   (`git ls-files`, or a walk of the folder when it is not a repository;
+   capped), the start of `README`, `CLAUDE.md` and `AGENTS.md`, the build
+   and test commands (`pyproject.toml`, the `scripts` of `package.json`,
+   `Makefile` targets, the `run` steps of the CI workflows in
+   `.github/workflows/`), and the files the description names or that
+   match its key words (a cheap search over paths and contents, the best
+   matches first, capped by total size). The part that does not depend on
+   the description is cached per project and reused while git `HEAD`
+   stays the same; a new commit rebuilds it.
+2. **One `claude -p` call** with the pack inline in the request (sent on
+   standard input, since it can be larger than one command-line argument
+   may be) and no tools: `--tools ""`, `--strict-mcp-config`,
+   `--no-session-persistence`, `--output-format json`, `--json-schema`
+   for the structured answer, and always `--model` and `--effort` from the
+   two draft settings (section 3, "Settings"; default Sonnet at low
+   effort), so the user's own Claude Code defaults do not decide them. An
+   empty setting leaves the flag out (Claude Code's default).
+
+The answer is the prompt, written to the template from what the pack
+shows (real paths, the project's own build and test commands; where the
+pack does not show something, the prompt says where to look instead of
+guessing), a title, and up to five questions where my description leaves
+a choice open that matters. Each question comes with its `assumption`
+(what the prompt assumes, and is written into the prompt) and a
+`blocking` flag. The request says that the default is to assume and go
+on: `blocking` is true only when the task cannot sensibly be done without
+the answer (contradictory goals, a choice between incompatible designs
+where a guess wastes the whole run).
+
+When the draft is done it fills the task's prompt and title. With a
+blocking question the task goes On hold; otherwise it goes where "Put in"
+said (the queue by default). If the draft fails (Claude not installed,
+not signed in, usage limit, a bad answer), the task goes On hold with the
+error on its card and two ways on: "Retry the draft", or "Write it
+myself", which fills the prompt with the template and the description to
+edit by hand. A task left drafting when the service stopped is drafted
+again when it starts.
+
+The questions are listed on the card, each with its assumption and an
+answer field. Answering is optional and needs no new call to Claude: the
+answered questions are added to the end of the prompt in a short
+"## Answers from the user" section (each question with its answer), which
+says that these answers replace what the prompt assumed; answering again
+rewrites that section. Unanswered questions keep the assumption written
+in the prompt. A task held for blocking questions cannot be queued until
+every blocking question is answered. The prompt stays editable on the
+card, like any task's.
+
+The draft uses a little of the normal Claude usage; it is something I
+start, so the queue's threshold does not apply. It calls `claude`
+directly, not nightshift: it is one short call with no usage logic. Tasks
+added from the command line are not drafted and do not use the template;
+the `/backlog` skill follows it (`claude-backlog template` prints it).
 
 "Duplicate" on any card fills the form from that task.
 
@@ -311,6 +371,11 @@ template` prints it).
   let the current task finish.
 - Defaults for model (the same list as in the new task form), effort,
   windows per attempt, attempts.
+- Writing prompts with Claude: the model (Sonnet, Haiku, Opus, or Claude
+  Code's default; setting `draft_model`, default `sonnet`, the alias, not
+  a pinned model) and the effort (setting `draft_effort`, default `low`;
+  empty means Claude Code's default). They are separate from the task
+  model, which is for runs only.
 - Project roots for the folder picker (default: the home folder; the
   parent folders of recent projects are added by themselves).
 - Prompt template for the new task form (section 3, "New task form"),
@@ -457,7 +522,11 @@ be changed by dragging without rewriting files.
 | `after_task` | the task this one starts after, or empty (section 6, "Tasks on the same project"); fixed at the first attempt |
 | `base_ref` | the branch `base_commit` was taken from when it is not the base branch: the branch of the task this one starts after; empty otherwise |
 | `branch`, `worktree` | `backlog/<id>` and `~/.local/share/claude-backlog/worktrees/<id>`, once created |
-| `status` | `hold`, `queued`, `running`, `done`, `attention`, `archived` |
+| `status` | `drafting`, `hold`, `queued`, `running`, `done`, `attention`, `archived` |
+| `description` | what I asked for in my own words, when Claude wrote the prompt from it |
+| `draft_target` | where a drafting task goes when its prompt is written: `queued` or `hold` |
+| `draft_error` | why the last draft failed, or empty |
+| `questions` | Claude's questions from the draft (JSON: question, assumption, blocking, answer) |
 | `priority` | 1 high, 2 normal, 3 low |
 | `position` | order within the priority group (a float, so a drop between two cards only changes the dropped one) |
 | `model`, `effort`, `max_windows`, `threshold`, `max_attempts` | settings; empty means "use the default" |
@@ -667,7 +736,8 @@ three ways, from most to least help:
    `claude-backlog add`. When the task builds on another task of the same
    project that is not merged yet, it adds `--after <id>`. The skill ships
    with the tool and is installed by `claude-backlog install`.
-2. **The board's form** (section 3).
+2. **The board's form** (section 3): a description in my own words, and
+   Claude writes the prompt in the background.
 3. **CLI**: `claude-backlog add -C ~/projects/acme-app -p high "prompt"`,
    `add task.md`, or `add -` to read the prompt from stdin.
 
@@ -726,8 +796,9 @@ built in this order.
    call, exit code mapping, attempts, recovery, `systemd-inhibit`.
 3. nightshift: `--usage-json`, `--status-file`.
 4. Service: API, Run now, Stop, presence watcher (away and back).
-5. Board: columns, drag and drop, new task form, detail panel with diff
-   and live log, usage bar, settings, phone layout.
+5. Board: columns, drag and drop, new task form (with the prompt drafted
+   in the background from a project pack), detail panel with diff and
+   live log, usage bar, settings, phone layout.
 6. Phone access: second port with the Tailscale login check,
    `install --phone`, QR code.
 7. Report file and desktop notification.
