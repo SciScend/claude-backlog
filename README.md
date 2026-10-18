@@ -76,13 +76,14 @@ it is done.
   job coming, type `/backlog` (optionally with a hint). Claude writes a
   self-contained prompt from the conversation and the code, shows it to you,
   and adds it after your OK.
-- **The board.** Press "New task" and pick the project folder. Describe
-  the task in a few sentences of your own and press **Write the prompt with
-  Claude**: Claude reads the project (read-only) and writes the full prompt,
-  with real paths and the project's own test commands, in a minute or two.
-  If something important is open it adds questions to your description;
-  answer them and press the button again. Or fill in the prompt template
-  yourself. Then choose a priority and add the task.
+- **The board.** Press "New task", pick the project folder (type to search
+  your projects, or type a path), and say in a few sentences of your own
+  what Claude should do. Press **Write the prompt with Claude**: Claude
+  reads the project (read-only) and writes the full prompt, with real paths
+  and the project's own test commands, in a minute or two. If something
+  important is open it lists questions above the prompt; answer them and
+  rewrite, or leave them. Or press "Write it myself" and fill in the prompt
+  template. Then check the prompt, choose a priority and add the task.
 - **The command line.**
 
   ```bash

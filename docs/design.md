@@ -133,7 +133,7 @@ here):
 ```
 +------------------------------------------------------------------------------+
 | Claude Backlog   Week [##########--|-------] 38%  stop at 50%  resets Thu 09:00|
-| Idle. Starts when away: ON (15 min)          [Run now v] [Stop after task]    |
+| Idle. Starts when away: ON (15 min)     [New task] [Run now v] [Settings]     |
 +------------------+----------------------+-------------------+-----------------+
 | ON HOLD          | QUEUE                | RUNNING           | DONE            |
 |                  | -- High ------------ |                   |  * new          |
@@ -144,14 +144,18 @@ here):
 |                  | [Write README]       |                   |                 |
 |                  | -- Low ------------- |                   | NEEDS ATTENTION |
 |                  | [Rename variables]   |                   | [Lint fixes]    |
-| [+ New task]     |                      |                   |  failed, exit 1 |
+|                  |                      |                   |  failed, exit 1 |
 +------------------+----------------------+-------------------+-----------------+
 ```
+
+"New task" is in the header (on the phone, a button at the bottom of the
+screen). An empty queue says so and offers the same button. The empty
+drop zones ("Drag a task here") show only while a card is being dragged.
 
 ### Columns
 
 - **On hold**: tasks that exist but must not run yet (drafts, waiting for
-  something). New tasks can be created here.
+  something). The new task form can put a task here.
 - **Queue**: what will run, in the order shown, top first. It has three
   priority groups: High, Normal, Low. Dragging a card moves it within a
   group or into another group; that is how priority is changed. Arrows on
@@ -187,29 +191,56 @@ Clicking a card opens a side panel:
 
 ### New task form
 
+The form has two steps, so the first thing it asks is what I want, not a
+page of fields.
+
+**1. What should Claude do?** The project folder and, in my own words,
+what the task is. Then either "Write the prompt with Claude" (below) or
+"Write it myself"; both go to step 2.
+
+The project folder is the board's own picker, not the browser's
+suggestion list (which cannot be styled and scrolls too fast). Typing
+filters the list; it offers, in this order:
+
+- recent project folders (from the tasks);
+- project folders under the project roots: folders up to two levels down
+  that hold `.git` or a build file (`pyproject.toml`, `package.json`,
+  `Makefile`, ...) or `CLAUDE.md`/`AGENTS.md`. The parent folders of
+  recent projects count as project roots too, so a folder used once brings
+  its neighbours with it;
+- when what I type starts with `/` or `~`, the subfolders of that path, so
+  any folder can be reached by typing it (Tab goes into the highlighted
+  folder).
+
+Arrow keys move, Enter picks, Esc closes. Under the field the form says
+whether the folder is a git repository (the task gets its own branch) or
+not (it then runs in the folder itself, without a branch, see section 6),
+and warns when the repository has uncommitted changes (they are not part
+of the task's starting point).
+
+**2. Check the prompt.** The prompt, then the rest:
+
 | Field | Default | Notes |
 |---|---|---|
-| Title | first line of the prompt | headings that come from the prompt template are skipped |
-| Project folder | last used | picked from recent folders and from the project roots in Settings, or typed |
-| Prompt | the prompt template | large text field; written as for a person who will not be there |
+| Prompt | Claude's draft, or the prompt template | large text field; written as for a person who will not be there |
+| Title | Claude's title, or the first line of the prompt | headings that come from the prompt template are skipped |
 | Priority | Normal | High / Normal / Low |
 | Put in | Queue | Queue or On hold |
-| Model, effort | from Settings | |
-| Windows per attempt | from Settings (2) | how many 5-hour windows one attempt may use (nightshift `-w`) |
-| Attempts | 3 | how many times a deferred task is retried before it needs attention |
 | Base branch | the project's current branch | the task's branch starts from its latest commit |
+| Model, effort | from Settings | folded away; the model is chosen from a list: Opus, Sonnet, Haiku, Fable (the aliases `claude --model` takes, each the latest version; Fable notes that some plans need usage credits for it), or Other for a full model name |
+| Windows per attempt | from Settings (2) | folded away; how many 5-hour windows one attempt may use (nightshift `-w`) |
+| Attempts | 3 | folded away; how many times a deferred task is retried before it needs attention |
 
-The form warns when the project folder is not a git repository (the task
-then runs in the folder itself, without a branch, see section 6) and when
-the repository has uncommitted changes (they are not part of the task's
-starting point).
+"Back" returns to step 1 without losing anything. The buttons stay at the
+bottom of the form at all times; on the phone the form fills the screen.
 
-The prompt field opens with the prompt template from Settings: a few
-headings with one line in angle brackets under each that says what goes
-there. The form refuses to add the task while a line from the template is
-still there unchanged, so every hint is either replaced or deleted, and
-while nothing but the template's headings is left. An empty template gives
-an empty field.
+With "Write it myself" the prompt field opens with the prompt template
+from Settings: a few headings with one line in angle brackets under each
+that says what goes there (the description from step 1, if any, replaces
+the first one). The form refuses to add the task while a line from the
+template is still there unchanged, so every hint is either replaced or
+deleted, and while nothing but the template's headings is left. An empty
+template gives an empty field.
 
 The default template asks for what the guides on unattended coding agents
 agree on (Anthropic's prompting and Claude Code best practices, the
@@ -229,26 +260,29 @@ Rules that hold for every task (no questions, STATE.md, small checked
 steps, not weakening tests, SUMMARY.md) are in the preamble (section 6),
 not in the template.
 
-**Write the prompt with Claude.** Above the prompt, a smaller field takes a
-description in my own words ("the import page is slow with big files; make
-it faster without changing the file format"). "Write the prompt" runs
-`claude -p` in the project folder with read-only tools (Read, Grep, Glob;
-`--permission-mode dontAsk`) and a structured answer: the prompt, written
-to the template from the actual code (real paths, the project's own build
-and test commands), and up to five questions where my description leaves a
-choice open that matters. The draft replaces the prompt field; the
-questions are appended to the description with empty answers, and pressing
-the button again writes a new draft with the answers. This takes a minute
-or two and uses a little of the normal Claude usage; it is something I
-start, so the queue's threshold does not apply. It calls `claude`
-directly, not nightshift: it is one short session with no usage logic.
-Tasks added from the command line do not use the template; the `/backlog`
-skill follows it (`claude-backlog template` prints it).
+**Write the prompt with Claude.** It runs `claude -p` in the project
+folder with read-only tools (Read, Grep, Glob; `--permission-mode
+dontAsk`) and a structured answer: the prompt, written to the template
+from the actual code (real paths, the project's own build and test
+commands), a title, and up to five questions where my description leaves a
+choice open that matters. Step 1 shows that Claude is reading the project
+and for how long; "Write it myself" stays available meanwhile. The draft
+fills step 2. Claude's questions are listed above the prompt, each with an
+answer field; "Rewrite with my answers" sends the description with the
+answered questions for a new draft (unanswered ones keep the assumption
+the draft states). This takes a minute or two and uses a little of the
+normal Claude usage; it is something I start, so the queue's threshold
+does not apply. It calls `claude` directly, not nightshift: it is one
+short session with no usage logic. Tasks added from the command line do
+not use the template; the `/backlog` skill follows it (`claude-backlog
+template` prints it).
 
 "Duplicate" on any card fills the form from that task.
 
 ### Header
 
+- **New task** opens the new task form (on the phone, the button at the
+  bottom of the screen).
 - **Weekly usage bar** with a marker at the stop threshold. Clicking the
   threshold changes it (the same setting as in Settings).
 - **Status line**: idle / running (started by me or because I was away) /
@@ -268,8 +302,10 @@ skill follows it (`claude-backlog template` prints it).
   screensaver (default 15).
 - When I come back to a run that started by itself: stop now (default) or
   let the current task finish.
-- Defaults for model, effort, windows per attempt, attempts.
-- Project roots for the folder picker (default: the home folder).
+- Defaults for model (the same list as in the new task form), effort,
+  windows per attempt, attempts.
+- Project roots for the folder picker (default: the home folder; the
+  parent folders of recent projects are added by themselves).
 - Prompt template for the new task form (section 3, "New task form"),
   with a button that restores the default one.
 - Port (default 8765; the Tailscale port is the next one).

@@ -21,10 +21,11 @@
       <div class="meter-text" id="meter-text">Reading usage...</div>
     </div>
     <div class="controls">
+      <button class="btn primary" id="new-task" type="button" data-new="queued">New task</button>
       <div class="split">
-        <button class="btn primary" id="run-now" type="button">Run now</button>
-        <button class="btn primary more" id="run-menu-btn" type="button"
-                aria-label="More run options" aria-haspopup="true">+</button>
+        <button class="btn work" id="run-now" type="button">Run now</button>
+        <button class="btn work more" id="run-menu-btn" type="button"
+                aria-label="Run until a time" title="Run until a time" aria-haspopup="true"><span class="chevron"></span></button>
         <div class="menu" id="run-menu" hidden>
           <label>Start no new task after
             <input type="time" id="run-until"></label>
@@ -59,14 +60,16 @@
   <section class="col col-hold" data-col="hold">
     <h2>On hold <span class="count" data-count="hold"></span></h2>
     <div class="list drop" data-status="hold" data-priority="2"></div>
-    <button class="btn add" type="button" data-new="hold">New task on hold</button>
   </section>
   <section class="col col-queue active" data-col="queue">
     <h2>Queue <span class="count" data-count="queue"></span></h2>
+    <div class="empty" id="queue-empty" hidden>
+      <p>The queue is empty. Add a task, and Claude works on it while you are away.</p>
+      <button class="btn primary" type="button" data-new="queued">New task</button>
+    </div>
     <div class="group"><h3>High</h3><div class="list drop" data-status="queued" data-priority="1"></div></div>
     <div class="group"><h3>Normal</h3><div class="list drop" data-status="queued" data-priority="2"></div></div>
     <div class="group"><h3>Low</h3><div class="list drop" data-status="queued" data-priority="3"></div></div>
-    <button class="btn add" type="button" data-new="queued">New task</button>
   </section>
   <section class="col col-running" data-col="running">
     <h2>Running</h2>
@@ -94,62 +97,105 @@
   <div class="panel-body" id="panel-body"></div>
 </aside>
 
-<dialog id="new-dialog">
-  <form id="new-form" method="dialog">
-    <h2>New task</h2>
-    <label>Project folder
-      <input name="project_dir" list="project-list" required autocomplete="off"
-             placeholder="/path/to/project">
-      <datalist id="project-list"></datalist>
-      <small id="project-info" class="hint"></small>
-    </label>
-    <label>Describe the task in your own words
-      <textarea name="description" rows="3"
-        placeholder="For example: the import page is slow with big files; make it faster without changing the file format."></textarea>
-    </label>
-    <div class="draft-row">
-      <button class="btn" id="draft-button" type="button">Write the prompt with Claude</button>
-      <small class="hint" id="draft-status" aria-live="polite">Claude reads the project and fills in the prompt below. Or write the prompt yourself.</small>
-    </div>
-    <label>Prompt
-      <textarea name="prompt" rows="16" required
-        placeholder="Write it for someone who cannot ask you anything: the goal, the files involved, how to check the result, and when it is done."></textarea>
-      <small class="hint">Replace each line in &lt;angle brackets&gt; or delete it.</small>
-    </label>
-    <label>Title <input name="title" placeholder="From the first line of the prompt"></label>
-    <div class="row">
-      <label>Priority
-        <select name="priority"><option value="high">High</option>
-          <option value="normal" selected>Normal</option><option value="low">Low</option></select></label>
-      <label>Put in
-        <select name="status"><option value="queued">Queue</option>
-          <option value="hold">On hold</option></select></label>
-      <label id="base-branch-wrap" hidden>Start from branch
-        <select name="base_branch" id="base-branch"></select></label>
-    </div>
-    <details>
-      <summary>Model, effort and limits</summary>
-      <div class="row">
-        <label>Model <input name="model" placeholder="Default"></label>
-        <label>Effort
-          <select name="effort"><option value="">Default</option><option>low</option>
-            <option>medium</option><option>high</option><option>xhigh</option>
-            <option>max</option></select></label>
-        <label>5-hour windows per attempt <input name="max_windows" placeholder="Default"></label>
-        <label>Attempts <input name="max_attempts" type="number" min="1" placeholder="Default"></label>
+<dialog id="new-dialog" class="sheet">
+  <form id="new-form" method="dialog" novalidate>
+    <header class="sheet-head">
+      <h2 id="new-heading">New task</h2>
+      <ol class="steps" aria-label="Steps">
+        <li data-step-mark="1" class="current">What to do</li>
+        <li data-step-mark="2">Check the prompt</li>
+      </ol>
+    </header>
+
+    <div class="sheet-body" data-step="1">
+      <div class="field picker" id="picker">
+        <label for="project-input">Project folder</label>
+        <input id="project-input" name="project_dir" autocomplete="off" spellcheck="false"
+               role="combobox" aria-expanded="false" aria-controls="picker-list"
+               aria-autocomplete="list" placeholder="Search your projects, or type a path">
+        <div class="picker-pop" id="picker-pop" hidden>
+          <ul class="picker-list" id="picker-list" role="listbox"></ul>
+          <p class="picker-foot">Type a path that starts with / or ~ to browse any folder.
+            Tab goes into the highlighted folder.</p>
+        </div>
+        <small id="project-info" class="hint"></small>
       </div>
-    </details>
-    <p class="form-error" id="new-error" hidden></p>
-    <div class="actions">
-      <button class="btn" value="cancel" formnovalidate type="submit">Cancel</button>
-      <button class="btn primary" id="new-submit" type="button">Add task</button>
+      <div class="field">
+        <label for="description">What should Claude do?</label>
+        <textarea id="description" name="description" rows="7"
+          placeholder="In your own words. For example: the import page is slow with big files; make it faster without changing the file format."></textarea>
+      </div>
     </div>
+
+    <div class="sheet-body" data-step="2" hidden>
+      <p class="for-project" id="for-project"></p>
+      <section class="questions" id="questions" hidden>
+        <h3>Claude has questions</h3>
+        <p class="hint">The draft below already assumes an answer. Answer the ones you care about and rewrite, or leave them.</p>
+        <div id="question-list"></div>
+        <button class="btn" id="redraft" type="button">Rewrite with my answers</button>
+      </section>
+      <div class="field grow">
+        <label for="prompt">Prompt</label>
+        <textarea id="prompt" name="prompt" rows="16"
+          placeholder="Write it for someone who cannot ask you anything: the goal, the files involved, how to check the result, and when it is done."></textarea>
+        <small class="hint" id="prompt-hint">Replace each line in &lt;angle brackets&gt; or delete it.</small>
+      </div>
+      <div class="field">
+        <label for="title">Title</label>
+        <input id="title" name="title" placeholder="From the first line of the prompt">
+      </div>
+      <div class="row">
+        <fieldset class="segmented">
+          <legend>Priority</legend>
+          <label><input type="radio" name="priority" value="high"><span>High</span></label>
+          <label><input type="radio" name="priority" value="normal" checked><span>Normal</span></label>
+          <label><input type="radio" name="priority" value="low"><span>Low</span></label>
+        </fieldset>
+        <fieldset class="segmented">
+          <legend>Put in</legend>
+          <label><input type="radio" name="status" value="queued" checked><span>Queue</span></label>
+          <label><input type="radio" name="status" value="hold"><span>On hold</span></label>
+        </fieldset>
+        <div class="field" id="base-branch-wrap" hidden>
+          <label for="base-branch">Start from branch</label>
+          <select name="base_branch" id="base-branch"></select>
+        </div>
+      </div>
+      <details>
+        <summary>Model, effort and limits</summary>
+        <div class="row">
+          <label>Model <input name="model" placeholder="Default"></label>
+          <label>Effort
+            <select name="effort"><option value="">Default</option><option>low</option>
+              <option>medium</option><option>high</option><option>xhigh</option>
+              <option>max</option></select></label>
+          <label>5-hour windows per attempt <input name="max_windows" placeholder="Default"></label>
+          <label>Attempts <input name="max_attempts" type="number" min="1" placeholder="Default"></label>
+        </div>
+      </details>
+    </div>
+
+    <footer class="sheet-foot">
+      <p class="draft-status" id="draft-status" aria-live="polite" hidden></p>
+      <p class="form-error" id="new-error" hidden></p>
+      <div class="actions" data-step="1">
+        <button class="btn ghost" value="cancel" type="submit">Cancel</button>
+        <button class="btn" id="write-myself" type="button">Write it myself</button>
+        <button class="btn primary" id="draft-button" type="button">Write the prompt with Claude</button>
+      </div>
+      <div class="actions" data-step="2" hidden>
+        <button class="btn ghost back" id="back" type="button">Back</button>
+        <button class="btn primary" id="new-submit" type="button">Add to the queue</button>
+      </div>
+    </footer>
   </form>
 </dialog>
 
-<dialog id="settings-dialog">
+<dialog id="settings-dialog" class="sheet">
   <form id="settings-form" method="dialog">
-    <h2>Settings</h2>
+    <header class="sheet-head"><h2>Settings</h2></header>
+    <div class="sheet-body">
     <fieldset>
       <legend>Weekly limit</legend>
       <label>Stop when weekly usage reaches (%)
@@ -177,7 +223,8 @@
         <label>Attempts <input name="max_attempts" type="number" min="1"></label>
       </div>
       <label>Folders that hold your projects (one per line)
-        <textarea name="project_roots" rows="3"></textarea></label>
+        <textarea name="project_roots" rows="3"></textarea>
+        <small class="hint">The folder picker offers the projects up to two levels below these, and next to projects you used before.</small></label>
       <label>Prompt template for new tasks
         <textarea name="prompt_template" rows="10"></textarea>
         <small class="hint">Lines in &lt;angle brackets&gt; are hints: a task cannot be added while one is left unchanged. Leave it empty for an empty prompt field.</small></label>
@@ -189,13 +236,18 @@
         <input name="tailscale_login" placeholder="you@example.com" autocomplete="off"></label>
       <div id="phone-info" class="phone-info"></div>
     </fieldset>
-    <p class="form-error" id="settings-error" hidden></p>
-    <div class="actions">
-      <button class="btn" value="cancel" formnovalidate type="submit">Cancel</button>
-      <button class="btn primary" id="settings-save" type="button">Save settings</button>
     </div>
+    <footer class="sheet-foot">
+      <p class="form-error" id="settings-error" hidden></p>
+      <div class="actions">
+        <button class="btn ghost" value="cancel" formnovalidate type="submit">Cancel</button>
+        <button class="btn primary" id="settings-save" type="button">Save settings</button>
+      </div>
+    </footer>
   </form>
 </dialog>
+
+<button class="fab" type="button" data-new="queued">New task</button>
 
 <div class="toast" id="toast" role="status" hidden></div>
 <script src="/static/app.js"></script>

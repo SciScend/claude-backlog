@@ -174,6 +174,26 @@ def test_project_info(client, repo, plain_dir):
         "exists": False}
 
 
+def test_projects_and_folders(client, tmp_path):
+    root = tmp_path / "work"
+    for name in ("app/.git", "lib", "group/site", "group/notes", "plain/sub", ".hidden/x"):
+        (root / name).mkdir(parents=True)
+    (root / "lib" / "pyproject.toml").write_text("")
+    (root / "group" / "site" / "package.json").write_text("")
+    client.put("/api/settings", json={"project_roots": [str(root)]})
+    data = client.get("/api/projects").json()
+    assert data["folders"] == [str(root / "app"), str(root / "group" / "site"),
+                               str(root / "lib")]
+    data = client.get("/api/folders", params={"path": str(root)}).json()
+    assert data["folders"] == [
+        {"path": str(root / "app"), "project": True},
+        {"path": str(root / "group"), "project": False},
+        {"path": str(root / "lib"), "project": True},
+        {"path": str(root / "plain"), "project": False},
+    ]
+    assert client.get("/api/folders", params={"path": "/no/such"}).json()["folders"] == []
+
+
 def test_draft_endpoint(client, plain_dir, monkeypatch):
     import sys
     from pathlib import Path

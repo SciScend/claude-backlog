@@ -400,22 +400,59 @@ def refresh_usage(request, _):
     return _svc(request).usage.get(force=True)
 
 
+# A folder holding one of these is offered as a project.
+PROJECT_MARKERS = (".git", "pyproject.toml", "setup.py", "package.json", "Cargo.toml",
+                   "go.mod", "Makefile", "CMakeLists.txt", "pom.xml", "build.gradle",
+                   "Gemfile", "composer.json", "CLAUDE.md", "AGENTS.md")
+SKIP_FOLDERS = {"node_modules", "__pycache__", "venv", "site-packages"}
+
+
+def _is_project(path: Path) -> bool:
+    return any((path / marker).exists() for marker in PROJECT_MARKERS)
+
+
+def _subfolders(path: Path) -> list[Path]:
+    try:
+        return sorted((p for p in path.iterdir() if not p.name.startswith(".")
+                       and p.name not in SKIP_FOLDERS and p.is_dir()),
+                      key=lambda p: p.name.lower())
+    except OSError:
+        return []
+
+
+def find_projects(roots) -> list[str]:
+    """Project folders up to two levels below each root."""
+    found = []
+    for root in roots:
+        for child in _subfolders(root):
+            if _is_project(child):
+                found.append(str(child))
+                continue
+            found += [str(p) for p in _subfolders(child) if _is_project(p)]
+    return list(dict.fromkeys(found))
+
+
 def list_projects(request, _):
     conn = _svc(request).conn()
     conf = settings.get_all(conn)
     recent = [r["project_dir"] for r in conn.execute(
         "SELECT project_dir, MAX(created_at) AS last FROM tasks GROUP BY project_dir "
         "ORDER BY last DESC LIMIT 10")]
-    found = []
-    for root in conf["project_roots"]:
-        root = Path(os.path.expanduser(root))
-        try:
-            children = sorted(p for p in root.iterdir()
-                              if p.is_dir() and not p.name.startswith("."))
-        except OSError:
-            continue
-        found += [str(p) for p in children]
-    return {"recent": recent, "folders": found}
+    roots = [Path(os.path.expanduser(r)) for r in conf["project_roots"]]
+    roots += [Path(r).parent for r in recent]
+    return {"recent": recent, "folders": find_projects(dict.fromkeys(roots)),
+            "home": str(Path.home())}
+
+
+def list_folders(request, _):
+    """The subfolders of one folder, for typing a path in the folder picker."""
+    folder = request.query_params.get("path", "")
+    path = Path(os.path.expanduser(folder or "~"))
+    if not path.is_dir():
+        return {"path": str(path), "folders": []}
+    return {"path": str(path),
+            "folders": [{"path": str(p), "project": _is_project(p)}
+                        for p in _subfolders(path)[:500]]}
 
 
 def project_info(request, _):
@@ -594,6 +631,7 @@ def create_app(service: Service, on_shutdown=None) -> Starlette:
         Route("/api/settings", h(put_settings), methods=["PUT"]),
         Route("/api/usage", h(refresh_usage), methods=["POST"]),
         Route("/api/projects", h(list_projects)),
+        Route("/api/folders", h(list_folders)),
         Route("/api/project-info", h(project_info)),
         Route("/api/report", h(latest_report)),
         Route("/api/phone", h(phone_info)),

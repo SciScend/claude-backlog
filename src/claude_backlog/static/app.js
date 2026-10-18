@@ -231,6 +231,8 @@ function renderBoard() {
     if (key === "done" && el.closest(".tabs")) n = counts.done + counts.attention;
     el.textContent = n ? String(n) : "";
   }
+  $("#queue-empty").hidden = counts.queue > 0;
+  $(".col-queue").classList.toggle("is-empty", counts.queue === 0);
   if (running.length) pollTail(running[0].id);
 }
 
@@ -294,12 +296,14 @@ function setupDragAndDrop() {
     if (!card) return;
     dragId = card.dataset.id;
     card.classList.add("dragging");
+    document.body.classList.add("dragging");
     e.dataTransfer.effectAllowed = "move";
     e.dataTransfer.setData("text/plain", dragId);
   });
   board.addEventListener("dragend", (e) => {
     const card = e.target.closest(".ticket");
     if (card) card.classList.remove("dragging");
+    document.body.classList.remove("dragging");
     $$(".list.over").forEach((l) => l.classList.remove("over"));
     dragId = null;
   });
@@ -324,6 +328,46 @@ function setupDragAndDrop() {
     const body = { status: list.dataset.status, priority: Number(list.dataset.priority), index };
     act(api("POST", `/api/tasks/${dragId}/move`, body));
   });
+}
+
+// --- choosing a model --------------------------------------------------------
+
+// The aliases `claude --model` takes; each one means the latest version.
+const MODEL_ALIASES = ["opus", "sonnet", "haiku", "fable"];
+const MODEL_NOTES = { fable: " (some plans need usage credits for it)" };
+
+function defaultModelLabel() {
+  const model = state.settings.model;
+  return model ? `Default (${model})` : "Default";
+}
+
+// Puts a list of models in front of a model input; "Other" shows the input
+// for a full model name. Call again after changing the input's value.
+function modelPicker(input, defaultLabel) {
+  let select = input.previousElementSibling;
+  if (!select || !select.classList.contains("model-select")) {
+    select = document.createElement("select");
+    select.className = "model-select";
+    input.before(select);
+    select.addEventListener("change", () => {
+      const other = select.value === "other";
+      input.hidden = !other;
+      if (!other) return void (input.value = select.value);
+      if (MODEL_ALIASES.includes(input.value)) input.value = "";
+      input.focus();
+    });
+  }
+  const value = input.value.trim();
+  const known = !value || MODEL_ALIASES.includes(value);
+  select.innerHTML = [
+    `<option value="">${esc(defaultLabel)}</option>`,
+    ...MODEL_ALIASES.map((a) => `<option value="${a}">${a[0].toUpperCase()}${a.slice(1)}, latest${MODEL_NOTES[a] || ""}</option>`),
+    '<option value="other">Other: type a full model name</option>',
+  ].join("");
+  select.value = known ? value : "other";
+  select.disabled = input.disabled;
+  input.hidden = known;
+  input.placeholder = "Full model name";
 }
 
 // --- the detail panel -------------------------------------------------------
@@ -363,7 +407,10 @@ function renderPanel() {
   for (const b of $$("#panel-tabs button")) b.classList.toggle("active", b.dataset.tab === openTab);
   const body = $("#panel-body");
   if (openTab === "overview") body.innerHTML = overviewHtml();
-  if (openTab === "edit" && !body.querySelector("#edit-form[data-id='" + CSS.escape(task.id) + "']")) body.innerHTML = editHtml();
+  if (openTab === "edit" && !body.querySelector("#edit-form[data-id='" + CSS.escape(task.id) + "']")) {
+    body.innerHTML = editHtml();
+    modelPicker($("#edit-form").model, defaultModelLabel());
+  }
   if (openTab === "log") renderLog(body);
   if (openTab === "changes") renderChanges(body);
 }
@@ -543,33 +590,287 @@ function setupPanel() {
 
 // --- new task ---------------------------------------------------------------
 
+// The form has two steps: 1, what to do (project and description); 2, the
+// prompt and the rest. A draft from Claude is ignored once its token is old.
+const newTask = { token: 0, prompt: "", title: "", timer: null, questions: [], project: null };
+
+function showStep(step) {
+  for (const el of $$("#new-form [data-step]")) el.hidden = el.dataset.step !== String(step);
+  for (const li of $$("#new-form [data-step-mark]")) {
+    li.classList.toggle("current", li.dataset.stepMark === String(step));
+    li.classList.toggle("done", Number(li.dataset.stepMark) < step);
+  }
+  $("#new-error").hidden = true;
+}
+
+function currentStep() {
+  return $('#new-form .sheet-body[data-step="2"]').hidden ? 1 : 2;
+}
+
 async function openNewTask(status) {
-  const dialog = $("#new-dialog");
   const form = $("#new-form");
   form.reset();
-  draftState.token += 1;  // a draft still being written belongs to the old form
-  draftState.prompt = "";
-  draftState.title = "";
-  form.description.rows = 3;
+  newTask.token += 1;  // a draft still being written belongs to the old form
+  Object.assign(newTask, { prompt: "", title: "", project: null });
   setDrafting(false);
-  $("#draft-status").textContent = DRAFT_HINT;
-  $("#draft-status").className = "hint";
-  form.prompt.value = state.settings.prompt_template ? state.settings.prompt_template + "\n" : "";
+  setDraftStatus("");
+  renderQuestions([]);
   form.status.value = status || "queued";
-  $("#new-error").hidden = true;
+  modelPicker(form.model, defaultModelLabel());
+  updateSubmitLabel();
   $("#project-info").textContent = "";
   $("#base-branch-wrap").hidden = true;
+  showStep(1);
   let last = "";
   try { last = localStorage.getItem("backlog.lastProject") || ""; } catch (err) { /* private mode */ }
   form.project_dir.value = last;
-  dialog.showModal();
-  if (last) checkProject();
+  $("#new-dialog").showModal();
+  if (last) {
+    checkProject();
+    form.description.focus();
+  } else {
+    form.project_dir.focus();
+  }
+  loadProjects();
+}
+
+function updateSubmitLabel() {
+  const hold = $("#new-form").status.value === "hold";
+  $("#new-submit").textContent = hold ? "Put on hold" : "Add to the queue";
+}
+
+// Unsaved work in the form, so closing it asks first.
+function formHasWork() {
+  const form = $("#new-form");
+  const prompt = form.prompt.value.trim();
+  const untouched = ["", (state.settings.prompt_template || "").trim()];
+  return Boolean(form.description.value.trim()) || !untouched.includes(prompt);
+}
+
+// --- the project folder picker ---
+
+const picker = { projects: [], folders: new Map(), items: [], active: -1, seq: 0, home: "" };
+
+// The path as it is shown: the home folder as ~.
+function tilde(path) {
+  const home = picker.home;
+  if (home && (path === home || path.startsWith(home + "/"))) return "~" + path.slice(home.length);
+  return path;
+}
+
+function baseName(path) {
+  const parts = path.replace(/\/+$/, "").split("/");
+  return parts.pop() || "/";
+}
+
+function parentPath(path) {
+  const trimmed = path.replace(/\/+$/, "");
+  return trimmed.slice(0, trimmed.lastIndexOf("/")) || "/";
+}
+
+async function loadProjects() {
   try {
-    const projects = await api("GET", "/api/projects");
-    const all = [...new Set([...projects.recent, ...projects.folders])];
-    $("#project-list").innerHTML = all.map((p) => `<option value="${esc(p)}">`).join("");
-  } catch (err) { /* suggestions are optional */ }
-  selectHint(form.prompt);
+    const data = await api("GET", "/api/projects");
+    picker.home = data.home || "";
+    picker.projects = [
+      ...data.recent.map((path) => ({ path, group: "Recent" })),
+      ...data.folders.filter((p) => !data.recent.includes(p)).map((path) => ({ path, group: "Projects" })),
+    ];
+  } catch (err) { picker.projects = []; }
+  picker.folders.clear();
+  if (!$("#picker-pop").hidden) renderPicker();
+}
+
+function subfolders(dir) {
+  if (!picker.folders.has(dir)) {
+    picker.folders.set(dir, api("GET", `/api/folders?path=${encodeURIComponent(dir)}`)
+      .then((data) => data.folders).catch(() => []));
+  }
+  return picker.folders.get(dir);
+}
+
+// Typing a path browses its folder; anything else filters the projects.
+async function pickerItems(query) {
+  if (query.startsWith("/") || query.startsWith("~")) {
+    const cut = query.lastIndexOf("/");
+    const dir = cut >= 0 ? query.slice(0, cut + 1) : query + "/";
+    const prefix = cut >= 0 ? query.slice(cut + 1).toLowerCase() : "";
+    const folders = await subfolders(dir);
+    return {
+      browsing: true,
+      prefix,
+      items: folders
+        .filter((f) => baseName(f.path).toLowerCase().startsWith(prefix))
+        .map((f) => ({ path: f.path, project: f.project, group: `Folders in ${tilde(dir)}` })),
+    };
+  }
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const items = picker.projects.filter((p) => words.every((w) => p.path.toLowerCase().includes(w)));
+  if (words.length) {
+    // Folders whose own name matches come first.
+    const named = (p) => baseName(p.path).toLowerCase().includes(words[0]);
+    items.sort((a, b) => named(b) - named(a));
+    for (const item of items) item.group = "Matching projects";
+  }
+  return { browsing: false, prefix: query, items: items.slice(0, 200) };
+}
+
+async function renderPicker(keepActive) {
+  const input = $("#project-input");
+  const seq = ++picker.seq;
+  const found = await pickerItems(input.value.trim());
+  if (seq !== picker.seq) return;
+  picker.items = found.items;
+  picker.browsing = found.browsing;
+  if (!keepActive) picker.active = found.items.length && found.prefix ? 0 : -1;
+  const pop = $("#picker-pop");
+  const list = $("#picker-list");
+  let group = null;
+  let html = "";
+  found.items.forEach((item, i) => {
+    if (item.group !== group) {
+      group = item.group;
+      html += `<li class="picker-group" role="presentation">${esc(group)}</li>`;
+    }
+    html += `<li role="option" id="pick-${i}" data-index="${i}"
+        aria-selected="${i === picker.active}" class="${i === picker.active ? "active" : ""}">
+      <span class="name">${esc(baseName(item.path))}</span>
+      <span class="where">${esc(tilde(parentPath(item.path)))}</span>
+      ${item.project ? '<span class="tag">project</span>' : ""}</li>`;
+  });
+  if (!found.items.length) {
+    html = `<li class="picker-empty" role="presentation">${found.browsing
+      ? "No folders here."
+      : picker.projects.length ? "No project matches." : "No projects found yet. Type a path, for example /home/ or ~/."}</li>`;
+  }
+  list.innerHTML = html;
+  list.classList.toggle("browsing", found.browsing);
+  pop.hidden = false;
+  input.setAttribute("aria-expanded", "true");
+  if (picker.active >= 0) {
+    input.setAttribute("aria-activedescendant", `pick-${picker.active}`);
+    $(`#pick-${picker.active}`).scrollIntoView({ block: "nearest" });
+  } else {
+    input.removeAttribute("aria-activedescendant");
+  }
+}
+
+function closePicker() {
+  picker.seq++;
+  $("#picker-pop").hidden = true;
+  $("#project-input").setAttribute("aria-expanded", "false");
+}
+
+function choosePath(path) {
+  const input = $("#project-input");
+  input.value = path;
+  closePicker();
+  checkProject();
+  $("#new-form").description.focus();
+}
+
+function setupPicker() {
+  const input = $("#project-input");
+  const list = $("#picker-list");
+  input.addEventListener("focus", () => renderPicker());
+  input.addEventListener("input", () => renderPicker());
+  input.addEventListener("blur", () => {
+    closePicker();
+    if (input.value.trim() !== (newTask.project || "")) checkProject();
+  });
+  input.addEventListener("keydown", (e) => {
+    const open = !$("#picker-pop").hidden;
+    const n = picker.items.length;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (!open) return renderPicker();
+      if (!n) return;
+      const step = e.key === "ArrowDown" ? 1 : -1;
+      picker.active = picker.active < 0 ? (step > 0 ? 0 : n - 1) : Math.min(n - 1, Math.max(0, picker.active + step));
+      renderPicker(true);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (open && picker.active >= 0) return choosePath(picker.items[picker.active].path);
+      closePicker();
+      checkProject();
+    } else if (e.key === "Tab" && open && picker.browsing && picker.active >= 0 && !e.shiftKey) {
+      e.preventDefault();
+      const path = picker.items[picker.active].path;
+      input.value = (input.value.trim().startsWith("~") ? tilde(path) : path) + "/";
+      renderPicker();
+    } else if (e.key === "Escape" && open) {
+      e.preventDefault();
+      e.stopPropagation();
+      closePicker();
+    }
+  });
+  // Keep the focus in the field while clicking the list.
+  list.addEventListener("mousedown", (e) => e.preventDefault());
+  list.addEventListener("click", (e) => {
+    const li = e.target.closest("li[data-index]");
+    if (li) choosePath(picker.items[Number(li.dataset.index)].path);
+  });
+}
+
+// Shows what kind of folder the project is; returns whether it exists.
+async function checkProject() {
+  const form = $("#new-form");
+  const path = form.project_dir.value.trim();
+  const info = $("#project-info");
+  const wrap = $("#base-branch-wrap");
+  newTask.project = path;
+  info.className = "hint";
+  $("#for-project").textContent = path ? `Project: ${tilde(path)}` : "";
+  if (!path) { info.textContent = ""; wrap.hidden = true; return false; }
+  try {
+    const data = await api("GET", `/api/project-info?path=${encodeURIComponent(path)}`);
+    if (form.project_dir.value.trim() !== path) return data.exists;
+    if (!data.exists) {
+      info.textContent = "This folder does not exist.";
+      info.className = "hint warn";
+      wrap.hidden = true;
+      return false;
+    }
+    if (!data.git) {
+      info.textContent = "Not a git repository: the task will run in this folder itself, without a branch.";
+      info.className = "hint warn";
+      wrap.hidden = true;
+      return true;
+    }
+    const select = $("#base-branch");
+    select.innerHTML = data.branches.map((b) => `<option${b === data.branch ? " selected" : ""}>${esc(b)}</option>`).join("");
+    wrap.hidden = !data.branches.length;
+    info.textContent = `Git repository. The task gets its own branch, starting from ${data.branch || "the current commit"}.`;
+    if (data.dirty) {
+      info.textContent += " It has uncommitted changes; they are not part of the task's starting point.";
+      info.className = "hint warn";
+    }
+    return true;
+  } catch (err) {
+    info.textContent = err.message;
+    return false;
+  }
+}
+
+async function projectReady() {
+  const form = $("#new-form");
+  if (!form.project_dir.value.trim()) {
+    showError("Choose the project folder first.");
+    form.project_dir.focus();
+    return false;
+  }
+  if (!(await checkProject())) {
+    showError("The project folder does not exist.");
+    form.project_dir.focus();
+    return false;
+  }
+  return true;
+}
+
+function showError(message) {
+  const box = $("#new-error");
+  box.textContent = message;
+  box.hidden = !message;
 }
 
 // Focus the prompt with its first hint selected, so typing replaces it.
@@ -582,66 +883,105 @@ function selectHint(field) {
   field.focus();
 }
 
-// --- writing the prompt with Claude ---
+// --- writing the prompt ---
 
-const DRAFT_HINT = "Claude reads the project and fills in the prompt below. Or write the prompt yourself.";
-const draftState = { token: 0, prompt: "", title: "", timer: null };
-
-function setDrafting(on) {
-  const button = $("#draft-button");
-  button.disabled = on;
-  button.textContent = on ? "Claude is writing..." : "Write the prompt with Claude";
-  clearInterval(draftState.timer);
-  if (!on) return;
-  const started = Date.now();
-  const status = $("#draft-status");
-  status.className = "hint";
-  const tick = () => {
-    const s = Math.round((Date.now() - started) / 1000);
-    status.textContent = `Claude is reading the project (${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}). This usually takes a minute or two.`;
-  };
-  tick();
-  draftState.timer = setInterval(tick, 1000);
+function setDraftStatus(message, kind) {
+  const el = $("#draft-status");
+  el.textContent = message;
+  el.className = `draft-status ${kind || ""}`;
+  el.hidden = !message;
 }
 
-async function writeDraft() {
+function setDrafting(on) {
+  $("#draft-button").disabled = on;
+  $("#redraft").disabled = on;
+  $("#draft-button").textContent = on ? "Claude is writing..." : "Write the prompt with Claude";
+  clearInterval(newTask.timer);
+  if (!on) return;
+  const started = Date.now();
+  const tick = () => {
+    const s = Math.round((Date.now() - started) / 1000);
+    setDraftStatus(`Claude is reading the project and writing the prompt (${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}). This usually takes a minute or two.`, "busy");
+  };
+  tick();
+  newTask.timer = setInterval(tick, 1000);
+}
+
+function renderQuestions(questions) {
+  newTask.questions = questions;
+  $("#questions").hidden = !questions.length;
+  $("#question-list").innerHTML = questions.map((q, i) => `<label class="question">
+      <span>${esc(q)}</span>
+      <input data-answer="${i}" placeholder="Your answer (optional)" autocomplete="off"></label>`).join("");
+}
+
+async function writeDraft(withAnswers) {
   const form = $("#new-form");
-  const status = $("#draft-status");
-  const description = form.description.value.trim();
-  const project = form.project_dir.value.trim();
-  const fail = (message) => { status.textContent = message; status.className = "hint warn"; };
-  if (!project) return fail("Choose the project folder first.");
-  if (!description) return fail("Describe the task first, in a few sentences.");
+  showError("");
+  if (!(await projectReady())) return;
+  let description = form.description.value.trim();
+  if (!description) {
+    showStep(1);
+    showError("Describe the task first, in a few sentences.");
+    form.description.focus();
+    return;
+  }
+  if (withAnswers) {
+    const answered = $$("[data-answer]")
+      .map((el) => [newTask.questions[Number(el.dataset.answer)], el.value.trim()])
+      .filter(([, answer]) => answer);
+    if (!answered.length) return showError("Answer at least one question first.");
+    description += "\n\nAnswers to your earlier questions:\n"
+      + answered.map(([q, a]) => `- ${q}\n  ${a}`).join("\n");
+  }
   const current = form.prompt.value.trim();
-  const untouched = [(state.settings.prompt_template || "").trim(), draftState.prompt.trim(), ""];
+  const untouched = [(state.settings.prompt_template || "").trim(), newTask.prompt.trim(), ""];
   if (!untouched.includes(current) && !confirm("Replace the prompt you wrote with Claude's draft?")) return;
-  const token = ++draftState.token;
+  const token = ++newTask.token;
   setDrafting(true);
   try {
-    const result = await api("POST", "/api/draft", { description, project_dir: project });
-    if (token !== draftState.token) return;
+    const result = await api("POST", "/api/draft", { description, project_dir: form.project_dir.value.trim() });
+    if (token !== newTask.token) return;
     form.prompt.value = result.prompt;
-    draftState.prompt = result.prompt;
+    newTask.prompt = result.prompt;
     const title = form.title.value.trim();
-    if (result.title && (!title || title === draftState.title)) {
+    if (result.title && (!title || title === newTask.title)) {
       form.title.value = result.title;
-      draftState.title = result.title;
+      newTask.title = result.title;
     }
-    $("#new-error").hidden = true;
-    const n = result.questions.length;
-    if (n) {
-      form.description.value = `${description}\n\nClaude asks (answer here, then write the prompt again):\n`
-        + result.questions.map((q) => `- ${q}\n  Answer: `).join("\n");
-      form.description.rows = Math.min(14, form.description.value.split("\n").length + 1);
-      status.textContent = `Draft ready. Claude has ${n} ${n === 1 ? "question" : "questions"} in the description above: answer and write the prompt again, or add the task as it is.`;
-    } else {
-      status.textContent = "Draft ready. Read it, change what you like, and add the task.";
-    }
+    renderQuestions(result.questions);
+    showStep(2);
+    form.prompt.scrollTop = 0;
+    $('#new-form .sheet-body[data-step="2"]').scrollTop = 0;
+    setDraftStatus(result.questions.length
+      ? "Draft ready. Claude's questions are above the prompt."
+      : "Draft ready. Read it, change what you like, and add it.", "ok");
   } catch (err) {
-    if (token === draftState.token) fail(err.message);
+    if (token === newTask.token) setDraftStatus(err.message, "warn");
   } finally {
-    if (token === draftState.token) setDrafting(false);
+    if (token === newTask.token) setDrafting(false);
   }
+}
+
+async function writeMyself() {
+  const form = $("#new-form");
+  showError("");
+  if (!(await projectReady())) return;
+  newTask.token += 1;  // a draft still being written is no longer wanted
+  setDrafting(false);
+  setDraftStatus("");
+  if (!form.prompt.value.trim()) {
+    const template = state.settings.prompt_template || "";
+    const description = form.description.value.trim();
+    let text = template ? template.trimEnd() + "\n" : "";
+    if (description) {
+      const hint = text.match(/^<.*>$/m);
+      text = hint ? text.replace(hint[0], () => description) : `${description}\n${text ? "\n" + text : ""}`;
+    }
+    form.prompt.value = text;
+  }
+  showStep(2);
+  selectHint(form.prompt);
 }
 
 // Why the prompt cannot be added yet, or "" when it can.
@@ -660,70 +1000,60 @@ function templateProblem(prompt) {
   return "";
 }
 
-async function checkProject() {
+async function addTask() {
   const form = $("#new-form");
-  const path = form.project_dir.value.trim();
-  const info = $("#project-info");
-  info.className = "hint";
-  if (!path) { info.textContent = ""; return; }
+  const data = Object.fromEntries(new FormData(form).entries());
+  for (const k of Object.keys(data)) if (data[k] === "") delete data[k];
+  if (data.max_attempts) data.max_attempts = Number(data.max_attempts);
+  if ($("#base-branch-wrap").hidden) delete data.base_branch;
+  delete data.description;
+  const problem = templateProblem(data.prompt || "");
+  if (problem) {
+    showError(problem);
+    selectHint(form.prompt);
+    return;
+  }
   try {
-    const data = await api("GET", `/api/project-info?path=${encodeURIComponent(path)}`);
-    const wrap = $("#base-branch-wrap");
-    if (!data.exists) {
-      info.textContent = "This folder does not exist.";
-      info.className = "hint warn";
-      wrap.hidden = true;
-      return;
-    }
-    if (!data.git) {
-      info.textContent = "Not a git repository: the task will run in this folder itself, without a branch.";
-      info.className = "hint warn";
-      wrap.hidden = true;
-      return;
-    }
-    const select = $("#base-branch");
-    select.innerHTML = data.branches.map((b) => `<option${b === data.branch ? " selected" : ""}>${esc(b)}</option>`).join("");
-    wrap.hidden = !data.branches.length;
-    info.textContent = `Git repository. The task gets its own branch, starting from ${data.branch || "the current commit"}.`;
-    if (data.dirty) {
-      info.textContent += " It has uncommitted changes; they are not part of the task's starting point.";
-      info.className = "hint warn";
-    }
-  } catch (err) { info.textContent = err.message; }
+    const result = await api("POST", "/api/tasks", data);
+    try { localStorage.setItem("backlog.lastProject", data.project_dir); } catch (err) { /* private mode */ }
+    newTask.token += 1;
+    $("#new-dialog").close();
+    toast(data.status === "hold" ? `Put "${result.task.title}" on hold.` : `Added "${result.task.title}" to the queue.`);
+    await refresh();
+  } catch (err) {
+    showError(err.message);
+  }
 }
 
 function setupNewTask() {
   for (const b of $$("[data-new]")) b.addEventListener("click", () => openNewTask(b.dataset.new));
   const form = $("#new-form");
-  form.project_dir.addEventListener("change", checkProject);
-  $("#draft-button").addEventListener("click", writeDraft);
-  $("#new-submit").addEventListener("click", async () => {
-    if (!form.reportValidity()) return;
-    const data = Object.fromEntries(new FormData(form).entries());
-    for (const k of Object.keys(data)) if (data[k] === "") delete data[k];
-    if (data.max_attempts) data.max_attempts = Number(data.max_attempts);
-    if ($("#base-branch-wrap").hidden) delete data.base_branch;
-    delete data.description;
-    const problem = templateProblem(data.prompt || "");
-    if (problem) {
-      const box = $("#new-error");
-      box.textContent = problem;
-      box.hidden = false;
-      selectHint(form.prompt);
+  const dialog = $("#new-dialog");
+  setupPicker();
+  $("#draft-button").addEventListener("click", () => writeDraft(false));
+  $("#redraft").addEventListener("click", () => writeDraft(true));
+  $("#write-myself").addEventListener("click", writeMyself);
+  $("#back").addEventListener("click", () => { showStep(1); form.description.focus(); });
+  $("#new-submit").addEventListener("click", addTask);
+  for (const radio of form.querySelectorAll('input[name="status"]')) radio.addEventListener("change", updateSubmitLabel);
+  form.addEventListener("keydown", (e) => {
+    // Enter in a one-line field must not close the form.
+    if (e.key === "Enter" && e.target.matches("input:not([type=radio])")) e.preventDefault();
+    if (e.key === "Enter" && e.target.matches("[data-answer]")) writeDraft(true);
+  });
+  const discard = (e) => {
+    if (formHasWork() && !confirm("Close the form and discard this task?")) {
+      e.preventDefault();
       return;
     }
-    try {
-      const result = await api("POST", "/api/tasks", data);
-      try { localStorage.setItem("backlog.lastProject", data.project_dir); } catch (err) { /* private mode */ }
-      $("#new-dialog").close();
-      toast(`Added "${result.task.title}".`);
-      await refresh();
-    } catch (err) {
-      const box = $("#new-error");
-      box.textContent = err.message;
-      box.hidden = false;
-    }
+    newTask.token += 1;
+    setDrafting(false);
+  };
+  dialog.addEventListener("cancel", (e) => {
+    if (!$("#picker-pop").hidden) { e.preventDefault(); closePicker(); return; }
+    discard(e);
   });
+  $('#new-form button[value="cancel"]').addEventListener("click", discard);
 }
 
 // --- settings ---------------------------------------------------------------
@@ -736,6 +1066,7 @@ async function openSettings() {
   form.away_minutes.value = s.away_minutes;
   form.on_return.value = s.on_return;
   form.model.value = s.model;
+  modelPicker(form.model, "Claude's default");
   form.effort.value = s.effort;
   form.max_windows.value = s.max_windows;
   form.max_attempts.value = s.max_attempts;
