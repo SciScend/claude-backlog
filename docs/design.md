@@ -411,6 +411,7 @@ the `/backlog` skill follows it (`claude-backlog template` prints it).
 ### Settings
 
 - Stop threshold, weekly usage % (default 50).
+- Stop at the weekly reset: on/off (default on, setting `stay_in_week`).
 - Start when away: on/off (default on), and after how many minutes of
   screensaver (default 15).
 - When I come back to a run that started by itself: stop now (default) or
@@ -488,7 +489,8 @@ The queue starts in two ways:
 It runs the tasks one after another, or several at a time (below), and
 stops when:
 
-- nightshift reports that the weekly threshold is reached (exit 3);
+- nightshift reports that the weekly threshold is reached (exit 3), or
+  that the weekly limit has reset since the queue started (exit 6);
 - the queue is empty, or the tasks left in it all wait for other tasks;
 - the "until HH:MM" time has passed (the running task is not cut short;
   its windows-per-attempt limit bounds it);
@@ -555,6 +557,16 @@ nightshift as `-t X` for every task. A task may override it. nightshift does
 not start a new session once usage is at or above X, so the remaining
 (100 - X)% is left for my own use.
 
+X is compared with the week's usage, which drops to about zero when the
+weekly limit resets. Without more, a queue still running then would go on
+spending the new week. So every attempt also gets `--week-of <the time the
+queue started>`: once the weekly limit has reset after that time,
+nightshift starts no session and exits 6, and the queue stops as it does
+at the threshold. An attempt that starts after the reset stops at once
+for the same reason. A session that is running at the reset is not cut
+short. The next Run now or "away" starts a new queue, which uses the new
+week. The setting "Stop at the weekly reset" (default on) turns this off.
+
 ### Several tasks at once
 
 The setting "Parallel tasks" (default 1) says how many tasks run at the
@@ -599,8 +611,8 @@ Which tasks may run together:
   before.
 
 Stop after this task, Stop now, and coming back while away apply to all
-running tasks. When one task reports the weekly limit (exit 3) or
-unreadable usage (exit 5), no new task starts; the ones still running
+running tasks. When one task reports the weekly limit (exit 3), the end
+of the week (exit 6) or unreadable usage (exit 5), no new task starts; the ones still running
 stop by themselves at their next session, as nightshift sees the same
 limit. One report covers the whole run.
 
@@ -692,6 +704,7 @@ one. The database is the only source of truth; files are not watched.
    claude-nightshift -f ~/.local/share/claude-backlog/tasks/<id>/prompt.md \
      -t <threshold> -w <max-windows> [-m <model>] [-e <effort>] \
      --run-id <id>-<run> [--spend <budget> [--spend-share <parallel>]] \
+     [--week-of <queue start>] \
      --status-file ~/.local/share/claude-backlog/tasks/<id>/nightshift-status.md \
      --log-file ~/.local/share/claude-backlog/tasks/<id>/logs/<run>.log
    ```
@@ -709,6 +722,7 @@ one. The database is the only source of truth; files are not watched.
 | `3` | weekly threshold reached | queued (deferred, keeps its place) | **stop** |
 | `4` | windows or budget for this attempt used up, unfinished | queued (attempt +1) | next task |
 | `5` | usage unreadable (new in nightshift) | queued (not counted) | **stop** |
+| `6` | the weekly limit reset since the queue started | queued (not counted) | **stop** |
 | `130` | stopped by me, or because I came back | queued (not counted) | **stop** |
 | other | killed or crashed | attention | next task |
 
@@ -1043,3 +1057,10 @@ Decided in review (2026-10-18):
    logic is nightshift's. Tasks of the same git repository may run
    together, each in its own worktree; tasks in the same non-git folder
    may not.
+9. **The weekly reset** (2026-10-19): the threshold is a share of the
+   current week, so a queue running at the weekly reset would go on into
+   the new week. By default a queue stays in the week it started in:
+   every attempt gets nightshift's `--week-of` with the queue's start
+   time and stops with exit 6 after the reset, before its next session.
+   A session that is running at the reset is not stopped; that can be
+   added in nightshift later.

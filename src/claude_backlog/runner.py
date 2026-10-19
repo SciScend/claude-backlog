@@ -26,9 +26,10 @@ logger = logging.getLogger(__name__)
 
 # nightshift exit codes
 COMPLETED, FAILED, BAD_ARGS, WEEKLY_LIMIT, RUN_BUDGET, USAGE_UNKNOWN = 0, 1, 2, 3, 4, 5
+WEEK_ENDED = 6
 INTERRUPTED = 130
 KNOWN_EXITS = {COMPLETED, FAILED, BAD_ARGS, WEEKLY_LIMIT, RUN_BUDGET, USAGE_UNKNOWN,
-               INTERRUPTED}
+               WEEK_ENDED, INTERRUPTED}
 
 # How long nightshift gets to wind down after SIGINT before it is killed.
 STOP_GRACE_SECONDS = 30
@@ -90,6 +91,9 @@ def map_exit(code, summary_exists, attempts_after, max_attempts) -> Mapping:
     if code == USAGE_UNKNOWN:
         return Mapping("usage-unknown", "queued", False, True,
                        "weekly usage could not be read")
+    if code == WEEK_ENDED:
+        return Mapping("week-ended", "queued", False, True,
+                       "the weekly limit reset, the new week is left alone")
     if code == INTERRUPTED:
         return Mapping("interrupted", "queued", False, True, "stopped")
     return Mapping("attention", "attention", True, False,
@@ -444,6 +448,9 @@ class Runner:
         if effort:
             cmd += ["-e", effort]
         cmd += spend_args(task["spend"] or conf["spend"], conf["parallel"])
+        if conf["stay_in_week"] and self.started_at:
+            # Every attempt of this queue run belongs to the week it started in.
+            cmd += ["--week-of", f"{self.started_at:.0f}"]
 
         env = dict(os.environ)
         if task["worktree"]:

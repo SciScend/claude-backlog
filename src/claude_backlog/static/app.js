@@ -1363,6 +1363,7 @@ async function openSettings() {
   const form = $("#settings-form");
   const s = state.settings;
   form.threshold.value = s.threshold;
+  form.stay_in_week.checked = s.stay_in_week;
   form.away_enabled.checked = s.away_enabled;
   form.away_minutes.value = s.away_minutes;
   form.on_return.value = s.on_return;
@@ -1407,6 +1408,7 @@ function setupSettings() {
     if (!form.reportValidity()) return;
     const changes = {
       threshold: Number(form.threshold.value),
+      stay_in_week: form.stay_in_week.checked,
       away_enabled: form.away_enabled.checked,
       away_minutes: Number(form.away_minutes.value),
       on_return: form.on_return.value,

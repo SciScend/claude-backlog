@@ -142,8 +142,8 @@ before any task gets a second one.
   current task instead.) A run you started with Run now is not stopped when
   you come back.
 
-The queue stops when the weekly limit is reached, when it is empty, or when
-you press **Stop after this task** or **Stop now**.
+The queue stops when the weekly limit is reached or resets, when it is
+empty, or when you press **Stop after this task** or **Stop now**.
 
 Leave the laptop lid open: closing it suspends the computer even while the
 queue runs. The board warns you when the computer would go to sleep before
@@ -155,6 +155,14 @@ the away delay is reached.
 bar) is passed to claude-nightshift for every task. No new Claude session
 starts once your weekly usage is at or above it. A task can have its own
 limit.
+
+The limit counts from the start of the week, so a queue that is still
+running when the weekly limit resets would go on with the new week. With
+"Stop when the weekly limit resets" (Settings, on by default) every attempt
+belongs to the week in which the queue started: after the reset no new
+session starts and the queue stops. A session that is running at the reset
+is not cut short. The next Run now, or the next time you are away, uses the
+new week.
 
 The board header shows usage the way the Claude Code statusline does, with
 the time left until each window resets:

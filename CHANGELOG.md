@@ -27,7 +27,10 @@ First version.
 - Starts on Run now, or when the screensaver has been on for a set time
   (Cinnamon, GNOME, freedesktop screensavers, logind fallback); stops when you
   come back.
-- Weekly limit setting (default 50%) passed to nightshift.
+- Weekly limit setting (default 50%) passed to nightshift. By default a
+  queue stays in the week it started in: nightshift's `--week-of` stops it
+  after the weekly reset (exit 6) instead of going on with the new week
+  (setting "Stop when the weekly limit resets").
 - Several tasks at once: a "Parallel tasks" setting (default 1). Each attempt
   has a budget of the weekly pool ("auto" splits what is left below the
   threshold between the parallel tasks; a percentage per task or as the

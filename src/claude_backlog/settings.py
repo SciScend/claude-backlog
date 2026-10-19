@@ -33,6 +33,9 @@ PROMPT_TEMPLATE = """\
 DEFAULTS = {
     # Stop at this share of the weekly limit (passed to nightshift as -t).
     "threshold": 50.0,
+    # Stop the queue when the weekly limit resets, instead of going on with
+    # the new week (passed to nightshift as --week-of).
+    "stay_in_week": True,
     # Start the queue when the screensaver has been on this long.
     "away_enabled": True,
     "away_minutes": 15,

@@ -218,6 +218,9 @@
       <legend>Weekly limit</legend>
       <label>Stop when weekly usage reaches (%)
         <input name="threshold" type="number" min="1" max="100" step="1" required></label>
+      <label class="inline"><input name="stay_in_week" type="checkbox"> Stop when the weekly limit resets</label>
+      <small class="hint">The threshold counts from the start of the week. Without this,
+        a queue still running at the weekly reset goes on with the new week.</small>
     </fieldset>
     <fieldset>
       <legend>When I am away</legend>

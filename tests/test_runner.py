@@ -49,6 +49,7 @@ def run_queue(r, trigger="run-now", until=None):
     (4, False, 1, ("deferred", "queued", True, False)),
     (4, False, 3, ("attention", "attention", True, False)),
     (5, False, 1, ("usage-unknown", "queued", False, True)),
+    (6, False, 1, ("week-ended", "queued", False, True)),
     (130, False, 1, ("interrupted", "queued", False, True)),
     (-9, False, 1, ("attention", "attention", True, False)),
 ])
@@ -402,6 +403,37 @@ def test_the_budget_is_passed_to_nightshift(conn, plain_dir, calls, make_runner,
     assert got[:len(expected)] == expected
     if expected and expected[1] != "auto":
         assert "--spend-share" not in args
+
+
+@pytest.mark.parametrize("stay", [True, False])
+def test_attempts_stay_in_the_week_the_queue_started(conn, plain_dir, calls,
+                                                     make_runner, stay):
+    settings.update(conn, {"stay_in_week": stay})
+    tasks.create(conn, "x", plain_dir)
+    r = make_runner()
+    run_queue(r)
+    args = calls()[0]["args"]
+    if stay:
+        assert float(args[args.index("--week-of") + 1]) == pytest.approx(r.started_at,
+                                                                          abs=1)
+    else:
+        assert "--week-of" not in args
+
+
+def test_the_end_of_the_week_stops_the_queue(conn, tmp_path, task_plans, calls,
+                                            make_runner):
+    made = []
+    for name in ("one", "two"):
+        (tmp_path / name).mkdir()
+        made.append(tasks.create(conn, name, tmp_path / name))
+    task_plans({made[0]["id"]: [{"exit": 6}]})
+    r = make_runner()
+    run_queue(r)
+    assert len(calls()) == 1
+    task = tasks.get(conn, made[0]["id"])
+    assert (task["status"], task["attempts"]) == ("queued", 0)
+    assert tasks.get(conn, made[1]["id"])["status"] == "queued"
+    assert r.last_stop["reason"] == "the weekly limit reset, the new week is left alone"
 
 
 def test_what_an_attempt_spent_is_recorded(conn, tmp_path, plain_dir, calls,
