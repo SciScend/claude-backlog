@@ -44,7 +44,7 @@ from claude_backlog import (
 from claude_backlog.presence import Watcher
 from claude_backlog.prompt import decisions_count
 from claude_backlog.runner import Runner
-from claude_backlog.usage import UsageCache
+from claude_backlog.usage import RunsCache, UsageCache
 
 __all__ = ["create_app", "serve", "Service"]
 
@@ -62,13 +62,15 @@ _markdown = MarkdownIt("commonmark", {"html": False, "linkify": False}).enable("
 class Service:
     """Everything the API needs, created once per process."""
 
-    def __init__(self, db_path=None, runner_=None, watcher=None, usage=None, port=8765):
+    def __init__(self, db_path=None, runner_=None, watcher=None, usage=None, port=8765,
+                 runs=None):
         self.db_path = db_path
         self.port = port
         self.phone_port = port + 1
         self.runner = runner_ or Runner(db_path)
         self.watcher = watcher
         self.usage = usage or UsageCache()
+        self.runs = runs or RunsCache()
         self._local = threading.local()
         self._conns = []
         self._conns_lock = threading.Lock()
@@ -287,6 +289,18 @@ def power_warnings(away_minutes) -> list[str]:
     return warnings
 
 
+def _runner_status(svc: Service) -> dict:
+    """The runner's status, with what each running task has spent so far."""
+    status = svc.runner.status()
+    if status["tasks"]:
+        runs = svc.runs.get()
+        for task in status["tasks"]:
+            run = runs.get(task["run_key"] or "") or {}
+            task["spent"] = run.get("spent")
+            task["cap"] = run.get("cap")
+    return status
+
+
 def _state(svc: Service) -> dict:
     conn = svc.conn()
     conf = settings.get_all(conn)
@@ -304,7 +318,7 @@ def _state(svc: Service) -> dict:
         "version": __version__,
         "revision": db.revision(conn),
         "tasks": _cards(conn),
-        "runner": svc.runner.status(),
+        "runner": _runner_status(svc),
         "usage": svc.usage.get(),
         "presence": svc.watcher.status() if svc.watcher else None,
         "settings": conf,
@@ -372,8 +386,8 @@ def get_state(request, _):
 def create_task(request, data):
     svc = _svc(request)
     allowed = {"prompt", "project_dir", "title", "priority", "status", "model", "effort",
-               "max_windows", "threshold", "max_attempts", "base_branch", "after_task",
-               "description"}
+               "max_windows", "spend", "threshold", "max_attempts", "base_branch",
+               "after_task", "description"}
     task = tasks.create(svc.conn(), **{k: v for k, v in data.items() if k in allowed})
     if task["status"] == "drafting":
         svc.start_draft(task["id"])
@@ -684,8 +698,10 @@ async def events(request: Request):
         conn = svc.conn()
         presence = svc.watcher.status() if svc.watcher else {}
         away = presence.get("away_seconds")
+        if svc.runner.slots:
+            svc.runs.get()  # what the running tasks spent, refreshed now and then
         return (db.revision(conn), svc.runner.version, svc.usage.read_at,
-                presence.get("detector"), bool(away))
+                svc.runs.version, presence.get("detector"), bool(away))
 
     async def stream():
         last = None
@@ -854,7 +870,7 @@ def serve(port=None, db_path=None) -> None:
     def shutdown():
         service.watcher.stop()
         if service.runner.state != "idle":
-            logger.info("stopping the running task; it goes back to the queue")
+            logger.info("stopping the running tasks; they go back to the queue")
         service.runner.shutdown()
         service.close()
         logger.info("stopped")

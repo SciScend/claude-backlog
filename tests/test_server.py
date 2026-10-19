@@ -21,10 +21,14 @@ class IdleRunner:
         self.started = []
         self.stopped = []
         self.state = "idle"
+        self.slots = {}
+        self.tasks = []
 
     def status(self):
         return {"state": self.state, "trigger": None, "until": None, "started_at": None,
-                "task_id": None, "task_started_at": None, "stop_mode": None,
+                "tasks": [dict(t) for t in self.tasks],
+                "task_id": None, "task_started_at": None,
+                "stop_mode": None,
                 "last_stop": None, "inhibit": True}
 
     def start(self, trigger, until=None):
@@ -548,3 +552,29 @@ def test_drafts_left_over_are_resumed(client, repo, fake_claude):
 def test_a_task_needs_a_prompt_or_a_description(client, repo):
     r = post(client, "/api/tasks", {"description": " ", "project_dir": str(repo)})
     assert r.status_code == 400 and "prompt is empty" in r.json()["error"]
+
+
+def test_running_tasks_show_what_they_spent(backlog_home):
+    class Runs:
+        version = 0
+
+        def get(self):
+            return {"a-1": {"spent": 1.5, "cap": 4.0}}
+
+    idle = IdleRunner()
+    idle.tasks = [{"task_id": "a", "started_at": 1.0, "run_key": "a-1"},
+                  {"task_id": "b", "started_at": 2.0, "run_key": None}]
+    service = Service(runner_=idle, usage=NoUsage(), port=8765, runs=Runs())
+    with TestClient(create_app(service), base_url=LOCAL) as c:
+        running = c.get("/api/state").json()["runner"]["tasks"]
+    assert running[0]["spent"] == 1.5 and running[0]["cap"] == 4.0
+    assert running[1]["spent"] is None
+    service.close()
+
+
+def test_settings_take_parallel_tasks_and_a_budget(client):
+    r = client.put("/api/settings", json={"parallel": 3, "spend": "6"})
+    assert r.json()["settings"]["parallel"] == 3
+    assert r.json()["settings"]["spend"] == "6"
+    assert client.put("/api/settings", json={"parallel": 0}).status_code == 400
+    assert client.put("/api/settings", json={"spend": "lots"}).status_code == 400

@@ -1,9 +1,11 @@
 """A stand-in for claude-nightshift in tests.
 
 Each call takes the next step from the JSON plan in $FAKE_NS_PLAN and records
-its arguments and working directory in $FAKE_NS_CALLS.
+its arguments and working directory in $FAKE_NS_CALLS. A plan that is an
+object keeps a list of steps per task id, for tasks that run at the same time.
 """
 
+import fcntl
 import json
 import os
 import signal
@@ -20,15 +22,23 @@ def main():
                           "five_hour_pct": 3.0, "five_hour_resets": 1792243200.0,
                           "source": "fake", "observed_at": 1.0}))
         return 0
-    calls = Path(os.environ["FAKE_NS_CALLS"])
-    with calls.open("a") as f:
-        f.write(json.dumps({"args": args, "cwd": os.getcwd()}) + "\n")
-    plan_path = Path(os.environ["FAKE_NS_PLAN"])
-    plan = json.loads(plan_path.read_text())
-    step = plan.pop(0) if plan else {"exit": 0, "summary": True}
-    plan_path.write_text(json.dumps(plan))
-
+    if "--runs-json" in args:
+        runs = Path(os.environ["FAKE_NS_PLAN"]).with_name("runs.json")
+        print(runs.read_text() if runs.exists() else "{}")
+        return 0
     task_dir = Path(args[args.index("-f") + 1]).parent
+    plan_path = Path(os.environ["FAKE_NS_PLAN"])
+    with open(str(plan_path) + ".lock", "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        calls = Path(os.environ["FAKE_NS_CALLS"])
+        with calls.open("a") as f:
+            f.write(json.dumps({"args": args, "cwd": os.getcwd(),
+                                "start": time.time()}) + "\n")
+        plan = json.loads(plan_path.read_text())
+        steps = plan.get(task_dir.name, []) if isinstance(plan, dict) else plan
+        step = steps.pop(0) if steps else {"exit": 0, "summary": True}
+        plan_path.write_text(json.dumps(plan))
+
     log = Path(args[args.index("--log-file") + 1])
     log.write_text("".join(f"2026-10-18 02:{i:02d}:00 - INFO - step {i} of the fake run\n"
                            for i in range(12)))
@@ -50,7 +60,10 @@ def main():
         signal.signal(signal.SIGINT, lambda *_: sys.exit(130))
         for _ in range(int(step.get("sleep_seconds", 3) * 20)):
             time.sleep(0.05)
-        return 1
+        if "exit" not in step:
+            return 1
+    with open(str(calls) + ".ends", "a") as f:
+        f.write(json.dumps({"task": task_dir.name, "end": time.time()}) + "\n")
     return step.get("exit", 0)
 
 

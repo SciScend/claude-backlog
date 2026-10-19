@@ -28,6 +28,13 @@ First version.
   (Cinnamon, GNOME, freedesktop screensavers, logind fallback); stops when you
   come back.
 - Weekly limit setting (default 50%) passed to nightshift.
+- Several tasks at once: a "Parallel tasks" setting (default 1). Each attempt
+  has a budget of the weekly pool ("auto" splits what is left below the
+  threshold between the parallel tasks; a percentage per task or as the
+  default), measured and enforced by claude-nightshift (`--run-id`,
+  `--spend`). The running cards and the run report show what each attempt
+  spent. Tasks of one repository may run together; tasks in the same folder
+  outside git may not.
 - Tasks on the same project: a task can start after another one (it waits,
   then starts from that task's branch); the board checks finished branches
   for merge conflicts with their base branch and with each other.

@@ -16,7 +16,7 @@ from claude_backlog import paths
 
 __all__ = ["SCHEMA_VERSION", "connect", "transaction", "revision", "now"]
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 MIGRATIONS = {
     1: """
@@ -96,6 +96,12 @@ MIGRATIONS = {
     # When a draft stopped by a usage limit is tried again by itself.
     6: """
     ALTER TABLE tasks ADD COLUMN draft_retry_at REAL;
+    """,
+    # Several tasks at once: each attempt's budget of the weekly pool, and
+    # what it spent of it.
+    7: """
+    ALTER TABLE tasks ADD COLUMN spend TEXT;
+    ALTER TABLE runs ADD COLUMN spent REAL;
     """,
 }
 

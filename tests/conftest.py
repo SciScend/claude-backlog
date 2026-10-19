@@ -38,6 +38,14 @@ def plan(tmp_path):
 
 
 @pytest.fixture
+def task_plans(tmp_path):
+    """Set what the fake nightshift does, per task id: {task_id: [step, ...]}."""
+    def set_plans(steps_by_task):
+        (tmp_path / "plan.json").write_text(json.dumps(steps_by_task))
+    return set_plans
+
+
+@pytest.fixture
 def calls(tmp_path):
     def read():
         path = tmp_path / "calls.jsonl"

@@ -94,7 +94,7 @@ def test_report_quotes_summaries(conn, plain_dir, backlog_home):
     path = report.write(conn, 0.0, 3700.0, "the queue is empty", "away", [attempt])
     text = path.read_text()
     assert "Started because: you were away. Stopped: the queue is empty." in text
-    assert "| done | 0 | 1h01m | 2 |" in text
+    assert "| done | 0 | 1h01m | - | 2 |" in text
     assert "> # Summary" in text
     assert report.summary_line("the queue is empty", [attempt]).startswith(
         "Stopped: the queue is empty. 1 done")

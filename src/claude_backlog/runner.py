@@ -1,4 +1,4 @@
-"""The runner: works through the queue, one task at a time, through nightshift."""
+"""The runner: works through the queue, one or more tasks at a time, through nightshift."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import contextlib
 import datetime
 import logging
 import os
+import queue
 import shutil
 import signal
 import subprocess
@@ -17,9 +18,9 @@ from pathlib import Path
 from claude_backlog import db, gitops, paths, report, settings, tasks
 from claude_backlog.prompt import build_prompt
 from claude_backlog.system import Inhibitor, notify
-from claude_backlog.usage import nightshift_command
+from claude_backlog.usage import nightshift_command, read_runs
 
-__all__ = ["Runner", "Attempt", "recover", "map_exit"]
+__all__ = ["Runner", "Attempt", "recover", "map_exit", "spend_args"]
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,7 @@ class Attempt:
     ended_at: float = 0.0
     log_path: str = ""
     commits: int = 0
+    spent: float | None = None  # weekly percent, from nightshift's ledger
 
 
 @dataclass
@@ -94,6 +96,22 @@ def map_exit(code, summary_exists, attempts_after, max_attempts) -> Mapping:
                    f"nightshift ended unexpectedly (exit {code}): see the log")
 
 
+def _inside(a, b) -> bool:
+    """Is folder ``a`` the folder ``b`` or inside it?"""
+    return a == b or a.startswith(b.rstrip(os.sep) + os.sep)
+
+
+def _clash(task, other) -> bool:
+    """May ``task`` not run while ``other`` does? The same task, or folders
+    outside git that overlap: those have no worktrees to keep them apart."""
+    if task["id"] == other["id"]:
+        return True
+    if task["repo_root"] or other["repo_root"]:
+        return False
+    a, b = task["project_dir"], other["project_dir"]
+    return _inside(a, b) or _inside(b, a)
+
+
 def recover(conn) -> list[str]:
     """Put back tasks left running when the service died. Returns their ids."""
     ids = [r["id"] for r in conn.execute("SELECT id FROM tasks WHERE status = 'running'")]
@@ -112,7 +130,11 @@ def recover(conn) -> list[str]:
 
 
 class Runner:
-    """Runs the queue in a background thread. One instance per service."""
+    """Runs the queue in a background thread. One instance per service.
+
+    Up to the "parallel" setting, tasks run at the same time, each in a
+    worker thread of its own with its own nightshift.
+    """
 
     def __init__(self, db_path=None, inhibitor=None, notifier=notify, on_change=None):
         self.db_path = db_path
@@ -121,13 +143,13 @@ class Runner:
         self.on_change = on_change or (lambda: None)
         self._lock = threading.RLock()
         self._thread = None
-        self.proc = None
+        self._finished = queue.Queue()  # attempts handed back by the workers
+        self._repo_locks = {}
+        self.slots = {}  # task id -> {"proc", "started_at", "run_key"}
         self.state = "idle"  # idle, running, stopping
         self.trigger = None  # run-now, away
         self.until = None
         self.started_at = None
-        self.task_id = None
-        self.task_started_at = None
         self.stop_mode = None  # None, after, now
         self.stop_cause = None  # "you", "back", "service"
         self.stop_requested_at = None
@@ -159,6 +181,7 @@ class Runner:
             self.stop_mode = None
             self.stop_cause = None
             self.stop_requested_at = None
+            self._finished = queue.Queue()
             self._thread = threading.Thread(target=self._loop, name="backlog-runner",
                                             daemon=True)
             self._thread.start()
@@ -174,12 +197,13 @@ class Runner:
             self.state = "stopping"
             if now:
                 self.stop_requested_at = time.time()
-                self._interrupt()
+                for slot in self.slots.values():
+                    self._interrupt(slot.get("proc"))
             self._changed()
             return True
 
-    def _interrupt(self) -> None:
-        proc = self.proc
+    @staticmethod
+    def _interrupt(proc) -> None:
         if proc and proc.poll() is None:
             with contextlib.suppress(ProcessLookupError):
                 os.kill(proc.pid, signal.SIGINT)
@@ -196,15 +220,26 @@ class Runner:
         if thread:
             thread.join(timeout)
 
+    def running(self) -> list[dict]:
+        """The tasks running now: task id, start time and nightshift run id."""
+        with self._lock:
+            return [{"task_id": task_id, "started_at": slot["started_at"],
+                     "run_key": slot.get("run_key")}
+                    for task_id, slot in self.slots.items()]
+
     def status(self) -> dict:
         with self._lock:
+            running = self.running()
+            first = running[0] if running else {}
             return {
                 "state": self.state,
                 "trigger": self.trigger,
                 "until": self.until,
                 "started_at": self.started_at,
-                "task_id": self.task_id,
-                "task_started_at": self.task_started_at,
+                "tasks": running,
+                # The first running task, for clients that show only one.
+                "task_id": first.get("task_id"),
+                "task_started_at": first.get("started_at"),
                 "stop_mode": self.stop_mode,
                 "last_stop": self.last_stop,
                 "inhibit": self.inhibitor.available,
@@ -212,73 +247,132 @@ class Runner:
 
     # --- the loop ---------------------------------------------------------
 
+    def _halt_reason(self):
+        """Why no new task may start now, or None."""
+        if self.stop_mode:
+            return "you came back" if self.stop_cause == "back" else "stopped by you"
+        if self.until and time.time() >= self.until:
+            return "the 'until' time has passed"
+        return None
+
     def _loop(self) -> None:
         conn = db.connect(self.db_path)
         attempts = []
         tried = set()
-        reason = None
+        halt = None  # why no new task starts any more
         started = time.time()
         trigger = self.trigger
         try:
             self.inhibitor.start("working through the claude-backlog queue")
             while True:
-                if self.stop_mode:
-                    reason = ("you came back" if self.stop_cause == "back"
-                              else "stopped by you")
+                halt = halt or self._halt_reason()
+                if halt is None:
+                    self._fill(conn, tried)
+                    if not self.slots:
+                        halt = ("the queue is empty" if not tasks.queue(conn) else
+                                "the tasks left in the queue wait for other tasks")
+                if halt and not self.slots:
                     break
-                if self.until and time.time() >= self.until:
-                    reason = "the 'until' time has passed"
-                    break
-                task = self._pick(conn, tried)
-                if task is None:
-                    reason = ("the queue is empty" if not tasks.queue(conn) else
-                              "the tasks left in the queue wait for other tasks")
-                    break
-                tried.add(task["id"])
-                attempt = self._run_task(conn, task)
+                try:
+                    attempt = self._finished.get(timeout=0.5)
+                except queue.Empty:
+                    continue
                 attempts.append(attempt)
-                if attempt.stop_queue:
+                with self._lock:
+                    self.slots.pop(attempt.task_id, None)
+                    self._changed()
+                if attempt.stop_queue and not halt:
                     if attempt.result == "interrupted":
-                        reason = ("you came back" if self.stop_cause == "back"
-                                  else "stopped by you")
+                        halt = self._halt_reason() or "stopped by you"
                     else:
-                        reason = attempt.note
-                    break
+                        halt = attempt.note
         except Exception as exc:  # the service must survive anything a run does
             logger.exception("the runner failed")
-            reason = f"internal error: {exc}"
+            halt = f"internal error: {exc}"
+            self.stop(now=True, cause=self.stop_cause or "you")
+            self._drain(attempts)
         finally:
-            self.inhibitor.stop()
-            ended = time.time()
-            quiet = (not attempts and self.last_stop
-                     and self.last_stop.get("reason") == reason)
-            try:
-                if attempts:
-                    report.write(conn, started, ended, reason, trigger, attempts)
-                if not quiet and self.stop_cause != "service":
-                    self.notifier("claude-backlog stopped", report.summary_line(reason,
-                                                                               attempts))
-            except Exception:
-                logger.exception("could not write the report")
-            conn.close()
+            self._finish(conn, attempts, started, halt, trigger)
+
+    def _drain(self, attempts, timeout=STOP_GRACE_SECONDS + 10) -> None:
+        """Wait for the workers still running after the loop failed."""
+        deadline = time.time() + timeout
+        while self.slots and time.time() < deadline:
+            with contextlib.suppress(queue.Empty):
+                attempt = self._finished.get(timeout=0.5)
+                attempts.append(attempt)
+                with self._lock:
+                    self.slots.pop(attempt.task_id, None)
+
+    def _finish(self, conn, attempts, started, reason, trigger) -> None:
+        self.inhibitor.stop()
+        ended = time.time()
+        quiet = (not attempts and self.last_stop
+                 and self.last_stop.get("reason") == reason)
+        try:
+            if attempts:
+                report.write(conn, started, ended, reason, trigger, attempts)
+            if not quiet and self.stop_cause != "service":
+                self.notifier("claude-backlog stopped", report.summary_line(reason,
+                                                                           attempts))
+        except Exception:
+            logger.exception("could not write the report")
+        conn.close()
+        with self._lock:
+            self.state = "idle"
+            self.slots = {}
+            self.last_stop = {"reason": reason, "at": ended, "trigger": trigger,
+                              "tasks": len(attempts)}
+            self._changed()
+
+    def _fill(self, conn, tried) -> None:
+        """Start tasks until every parallel slot is taken or none can start."""
+        parallel = settings.get(conn, "parallel")
+        while len(self.slots) < parallel:
+            busy = []
+            for task_id in list(self.slots):
+                with contextlib.suppress(tasks.TaskError):
+                    busy.append(tasks.get(conn, task_id))
+            task = self._pick(conn, tried, busy)
+            if task is None:
+                return
+            tried.add(task["id"])
             with self._lock:
-                self.state = "idle"
-                self.proc = None
-                self.task_id = None
-                self.task_started_at = None
-                self.last_stop = {"reason": reason, "at": ended, "trigger": trigger,
-                                  "tasks": len(attempts)}
+                self.slots[task["id"]] = {"proc": None, "started_at": time.time(),
+                                          "run_key": None}
                 self._changed()
+            threading.Thread(target=self._work, args=(task, self._finished),
+                             name=f"backlog-{task['id']}", daemon=True).start()
+
+    def _work(self, task, finished) -> None:
+        """One attempt, in a worker thread with its own database connection."""
+        conn = db.connect(self.db_path)
+        try:
+            attempt = self._run_task(conn, task)
+        except Exception as exc:
+            logger.exception("the attempt at %s failed", task["id"])
+            note = f"internal error: {exc}"
+            with contextlib.suppress(Exception):
+                tasks.set_status(conn, task["id"], "attention", note=note,
+                                 finished_at=time.time())
+            attempt = Attempt(task["id"], task["title"], None, "attention", "attention",
+                              False, False, note, time.time(), time.time())
+        finally:
+            conn.close()
+        finished.put(attempt)
 
     @staticmethod
-    def _pick(conn, tried):
+    def _pick(conn, tried, busy=()):
         """The next task: each queued task gets a turn before any gets a second one.
 
         A task that used up its windows goes back to its place in the queue, so
         without this it would run again at once and other tasks would wait.
-        When every queued task has had its turn, a new round begins.
+        When every queued task has had its turn, a new round begins. Tasks
+        that are running (``busy``), and tasks in a folder outside git that
+        a running task works in, are left out.
         """
-        queued = tasks.runnable(conn)
+        queued = [t for t in tasks.runnable(conn)
+                  if not any(_clash(t, other) for other in busy)]
         if not queued:
             return None
         for task in queued:
@@ -286,6 +380,11 @@ class Runner:
                 return task
         tried.clear()
         return queued[0]
+
+    def _repo_lock(self, repo_root):
+        """Serializes git commands on one repository between the workers."""
+        with self._lock:
+            return self._repo_locks.setdefault(repo_root, threading.Lock())
 
     def _run_task(self, conn, task) -> Attempt:
         conf = settings.get_all(conn)
@@ -300,7 +399,8 @@ class Runner:
 
         started = time.time()
         try:
-            cwd = self._prepare(conn, task)
+            with self._repo_lock(task["repo_root"]):
+                cwd = self._prepare(conn, task)
         except (gitops.GitError, OSError) as exc:
             note = f"could not prepare the git worktree: {exc}"
             tasks.set_status(conn, task_id, "attention", note=note, finished_at=started)
@@ -329,10 +429,11 @@ class Runner:
                 "WHERE id = ?", (started, task_id),
             )
 
+        run_key = f"{task_id}-{run_id}"
         cmd = [*nightshift_command(), "-f", str(prompt_file),
                "-t", f"{task['threshold'] or conf['threshold']:g}",
                "--status-file", str(tdir / "nightshift-status.md"),
-               "--log-file", str(log_path)]
+               "--log-file", str(log_path), "--run-id", run_key]
         windows = task["max_windows"] or conf["max_windows"]
         if windows:
             cmd += ["-w", str(windows)]
@@ -342,16 +443,16 @@ class Runner:
         effort = task["effort"] or conf["effort"]
         if effort:
             cmd += ["-e", effort]
+        cmd += spend_args(task["spend"] or conf["spend"], conf["parallel"])
 
         env = dict(os.environ)
         if task["worktree"]:
             env.update(gitops.identity_env(cwd))
         with self._lock:
-            self.task_id = task_id
-            self.task_started_at = started
+            self.slots[task_id].update(started_at=started, run_key=run_key)
             self._changed()
         console = tdir / "logs" / f"{run_id}.console.log"
-        code = self._run_nightshift(cmd, cwd, env, console)
+        code = self._run_nightshift(task_id, cmd, cwd, env, console)
         ended = time.time()
         if code in KNOWN_EXITS:
             # nightshift logged everything to the log file as well; the console
@@ -361,11 +462,13 @@ class Runner:
         commit_count = None
         if task["worktree"]:
             try:
-                if gitops.commit_all(task["worktree"], f"backlog: commit what attempt "
-                                     f"{task['attempts'] + 1} left uncommitted"):
-                    logger.info("committed leftover changes for %s", task_id)
-                commit_count = len(gitops.commits(task["repo_root"], task["base_commit"],
-                                                    task["branch"]))
+                with self._repo_lock(task["repo_root"]):
+                    if gitops.commit_all(task["worktree"], f"backlog: commit what "
+                                         f"attempt {task['attempts'] + 1} left "
+                                         "uncommitted"):
+                        logger.info("committed leftover changes for %s", task_id)
+                    commit_count = len(gitops.commits(task["repo_root"],
+                                                      task["base_commit"], task["branch"]))
             except gitops.GitError as exc:
                 logger.warning("could not commit leftovers for %s: %s", task_id, exc)
 
@@ -376,15 +479,17 @@ class Runner:
             fields["attempts"] = task["attempts"] + 1
         if mapping.status in ("done", "attention"):
             fields["finished_at"] = ended
+        spent = (read_runs().get(run_key) or {}).get("spent")
         with db.transaction(conn):
             conn.execute(
-                "UPDATE runs SET ended_at = ?, exit_code = ?, result = ? WHERE id = ?",
-                (ended, code, mapping.result, run_id),
+                "UPDATE runs SET ended_at = ?, exit_code = ?, result = ?, spent = ? "
+                "WHERE id = ?",
+                (ended, code, mapping.result, spent, run_id),
             )
         tasks.set_status(conn, task_id, mapping.status, **fields)
         return Attempt(task_id, task["title"], code, mapping.result, mapping.status,
                        mapping.counted, mapping.stop_queue, mapping.note, started, ended,
-                       str(log_path), commit_count or 0)
+                       str(log_path), commit_count or 0, spent)
 
     def _prepare(self, conn, task) -> Path:
         """Set up where the task runs; returns the working directory."""
@@ -435,7 +540,7 @@ class Runner:
             return base, None
         return tip, before["branch"]
 
-    def _run_nightshift(self, cmd, cwd, env, console_log) -> int:
+    def _run_nightshift(self, task_id, cmd, cwd, env, console_log) -> int:
         with open(console_log, "ab") as out:
             try:
                 proc = subprocess.Popen(cmd, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
@@ -445,10 +550,10 @@ class Runner:
                 out.write(f"could not start nightshift: {exc}\n".encode())
                 return FAILED
             with self._lock:
-                self.proc = proc
+                self.slots[task_id]["proc"] = proc
                 stop_now = self.stop_mode == "now"
             if stop_now:
-                self._interrupt()
+                self._interrupt(proc)
             while True:
                 try:
                     code = proc.wait(timeout=1)
@@ -459,7 +564,7 @@ class Runner:
                         and time.time() - self.stop_requested_at > STOP_GRACE_SECONDS):
                     self._kill(proc)
             with self._lock:
-                self.proc = None
+                self.slots[task_id]["proc"] = None
             if self.stop_mode == "now" and code != COMPLETED:
                 return INTERRUPTED
             return code
@@ -467,6 +572,19 @@ class Runner:
     def _kill(self, proc) -> None:
         with contextlib.suppress(ProcessLookupError):
             os.killpg(proc.pid, signal.SIGKILL)
+
+
+def spend_args(spend, parallel) -> list[str]:
+    """nightshift's budget options for an attempt.
+
+    ``auto`` with one slot sets no budget: with nothing to split, the
+    threshold and the windows per attempt bound the attempt, as before.
+    """
+    if spend == "auto":
+        if parallel <= 1:
+            return []
+        return ["--spend", "auto", "--spend-share", str(parallel)]
+    return ["--spend", spend] if spend else []
 
 
 def nightshift_available() -> bool:

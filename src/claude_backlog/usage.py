@@ -13,7 +13,7 @@ import sys
 import threading
 import time
 
-__all__ = ["NIGHTSHIFT_ENV", "nightshift_command", "UsageCache"]
+__all__ = ["NIGHTSHIFT_ENV", "nightshift_command", "read_runs", "RunsCache", "UsageCache"]
 
 NIGHTSHIFT_ENV = "CLAUDE_BACKLOG_NIGHTSHIFT"
 
@@ -24,6 +24,42 @@ def nightshift_command() -> list[str]:
     if override:
         return shlex.split(override)
     return [sys.executable, "-m", "claude_nightshift"]
+
+
+def read_runs(timeout=20) -> dict:
+    """What each nightshift run spent of the weekly pool and its budget, from
+    ``claude-nightshift --runs-json``: ``{run_id: {spent, cap, active, finished}}``.
+    Empty when nightshift cannot tell."""
+    try:
+        result = subprocess.run([*nightshift_command(), "--runs-json"],
+                                capture_output=True, text=True, timeout=timeout)
+        data = json.loads(result.stdout or "{}")
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return {}
+    return data if result.returncode == 0 and isinstance(data, dict) else {}
+
+
+class RunsCache:
+    """Reads what the nightshift runs spent at most every ``max_age`` seconds.
+    ``version`` changes when the figures do."""
+
+    def __init__(self, max_age=60, reader=None):
+        self.max_age = max_age
+        self.reader = reader or read_runs
+        self.value = {}
+        self.read_at = 0.0
+        self.version = 0
+        self._lock = threading.Lock()
+
+    def get(self) -> dict:
+        with self._lock:
+            if time.time() - self.read_at > self.max_age:
+                self.read_at = time.time()
+                value = self.reader()
+                if value != self.value:
+                    self.value = value
+                    self.version += 1
+            return self.value
 
 
 class UsageCache:

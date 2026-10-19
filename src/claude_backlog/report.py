@@ -39,15 +39,16 @@ def write(conn, started, ended, reason, trigger, attempts) -> Path:
         "",
         f"Started because: {how}. Stopped: {reason}.",
         "",
-        "| Task | Result | Exit | Time | Commits | Log |",
-        "|---|---|---|---|---|---|",
+        "| Task | Result | Exit | Time | Spent | Commits | Log |",
+        "|---|---|---|---|---|---|---|",
     ]
     for a in attempts:
         result = a.result + (f" ({a.note})" if a.note and a.result != "done" else "")
         exit_code = "-" if a.exit_code is None else str(a.exit_code)
+        spent = "-" if a.spent is None else f"{a.spent:g}%"
         lines.append(f"| {a.title} (`{a.task_id}`) | {result} | {exit_code} | "
-                     f"{fmt_duration(a.ended_at - a.started_at)} | {a.commits} | "
-                     f"{a.log_path or '-'} |")
+                     f"{fmt_duration(a.ended_at - a.started_at)} | {spent} | "
+                     f"{a.commits} | {a.log_path or '-'} |")
     for a in attempts:
         if a.result != "done":
             continue

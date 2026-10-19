@@ -163,8 +163,10 @@ drop zones ("Drag a task here") show only while a card is being dragged.
   High, Normal, Low. Dragging a card moves it within a group or into
   another group; that is how priority is changed. Arrows on the card ("to
   top", "up", "down") do the same without dragging.
-- **Running**: the task being worked on: time so far, which 5-hour window,
-  and the last lines of its log, updated live.
+- **Running**: the tasks being worked on (up to the "Parallel tasks"
+  setting): time so far, which 5-hour window, how much of the weekly pool
+  the attempt has spent against its budget, and the last lines of its
+  log, updated live.
 - **Done**: finished tasks, newest first. Tasks finished since I last
   looked carry a "new" mark. The card shows the number of commits on the
   task's branch and how many decisions Claude left for me (from
@@ -228,6 +230,7 @@ what the task is, then the task's settings:
 | Start from | the project's current branch | a branch (the task's branch starts from its latest commit), or "after" another task of the same repository (section 6, "Tasks on the same project") |
 | Model, effort | from Settings | folded away; the model is chosen from a list: Opus, Sonnet, Haiku, Fable (the aliases `claude --model` takes, each the latest version; Fable notes that some plans need usage credits for it), or Other for a full model name |
 | Windows per attempt | from Settings (2) | folded away; how many 5-hour windows one attempt may use (nightshift `-w`) |
+| Budget per attempt | from Settings (auto) | folded away; how much of the weekly pool one attempt may spend, in percent, or "auto" (section 4, "Several tasks at once") |
 | Attempts | 3 | folded away; how many times a deferred task is retried before it needs attention |
 
 Then either **Add** or **Write it myself**. Add creates the task at once,
@@ -403,6 +406,7 @@ the `/backlog` skill follows it (`claude-backlog template` prints it).
   time). This is the "I am leaving" button.
 - **Stop after this task** and, in its menu, **Stop now** (the running task
   goes back to the queue; its `STATE.md` and its branch keep its progress).
+  With several tasks running, both apply to all of them.
 
 ### Settings
 
@@ -412,7 +416,8 @@ the `/backlog` skill follows it (`claude-backlog template` prints it).
 - When I come back to a run that started by itself: stop now (default) or
   let the current task finish.
 - Defaults for model (the same list as in the new task form), effort,
-  windows per attempt, attempts.
+  windows per attempt, budget per attempt (default auto), attempts.
+- Parallel tasks: how many tasks run at the same time (default 1).
 - Writing prompts with Claude: the model (Sonnet, Haiku, Opus, or Claude
   Code's default; setting `draft_model`, default `sonnet`, the alias, not
   a pinned model) and the effort (setting `draft_effort`, default `low`;
@@ -480,7 +485,8 @@ The queue starts in two ways:
    been on for N minutes (default 15) and the queue has a task that can
    run (one that does not wait for another task).
 
-It runs one task after another and stops when:
+It runs the tasks one after another, or several at a time (below), and
+stops when:
 
 - nightshift reports that the weekly threshold is reached (exit 3);
 - the queue is empty, or the tasks left in it all wait for other tasks;
@@ -549,6 +555,55 @@ nightshift as `-t X` for every task. A task may override it. nightshift does
 not start a new session once usage is at or above X, so the remaining
 (100 - X)% is left for my own use.
 
+### Several tasks at once
+
+The setting "Parallel tasks" (default 1) says how many tasks run at the
+same time. The runner keeps that many going: when one ends, the next
+runnable task starts. Running in parallel does not buy more usage: all
+tasks draw on the same 5-hour window and the same weekly pool, so the
+window just runs out sooner. What it buys is that a long task no longer
+holds up the short ones behind it.
+
+Each task gets its own share of the weekly pool, its **budget per
+attempt**:
+
+- **auto** (the default): what is left below the stop threshold when the
+  attempt starts, split evenly between the parallel slots. With one slot
+  there is nothing to split, and only the threshold and the windows per
+  attempt bound the attempt, as before.
+- **a percentage**, set per task or as the default in Settings: the
+  attempt may spend at most that much of the weekly pool.
+- **empty**: no budget of its own; only the threshold and the windows per
+  attempt bound it.
+
+Measuring and enforcing it is nightshift's job: backlog passes
+`--run-id <task>-<run> --spend <budget> [--spend-share <parallel tasks>]`.
+nightshift keeps a shared ledger in which the rise in weekly usage is split
+between the runs that are going, by the tokens each used. Unlike the
+threshold, the budget is enforced during a session too: an attempt that
+spends its budget is stopped (nightshift exit 4) and goes back to the
+queue like an attempt that used up its windows. The card and the report
+show what each attempt spent (`claude-nightshift --runs-json`). It is an
+estimate: usage is reported in whole percent, and my own use of Claude
+while tasks run is charged to them.
+
+Which tasks may run together:
+
+- Tasks in different git repositories, or in the same repository: each
+  has its own worktree and branch. Git commands on one repository (making
+  a worktree, committing leftovers) are serialized, so they do not
+  collide on the repository's locks.
+- Two tasks in the same folder that is not a git repository never run
+  together; the second waits for a free slot after the first.
+- A task that starts after another one waits until that one is done, as
+  before.
+
+Stop after this task, Stop now, and coming back while away apply to all
+running tasks. When one task reports the weekly limit (exit 3) or
+unreadable usage (exit 5), no new task starts; the ones still running
+stop by themselves at their next session, as nightshift sees the same
+limit. One report covers the whole run.
+
 ## 5. Data
 
 SQLite, so the board and the runner can both write safely, and order can
@@ -574,12 +629,13 @@ be changed by dragging without rewriting files.
 | `questions` | Claude's questions from the draft (JSON: question, assumption, blocking, answer) |
 | `priority` | 1 high, 2 normal, 3 low |
 | `position` | order within the priority group (a float, so a drop between two cards only changes the dropped one) |
-| `model`, `effort`, `max_windows`, `threshold`, `max_attempts` | settings; empty means "use the default" |
+| `model`, `effort`, `max_windows`, `spend`, `threshold`, `max_attempts` | settings; empty means "use the default" (`spend`: a percentage, or `auto`) |
 | `attempts` | attempts counted so far |
 | `created_at`, `updated_at`, `finished_at`, `seen_at` | `seen_at` drives the "new" mark |
 
 **runs**: one row per attempt: `task_id`, `started_at`, `ended_at`,
-`exit_code`, `result`, `log_path`, `trigger` (`run-now` or `away`).
+`exit_code`, `result`, `log_path`, `trigger` (`run-now` or `away`),
+`spent` (weekly percent the attempt spent, from nightshift's ledger).
 
 **settings**: key/value.
 
@@ -604,6 +660,7 @@ priority: high
 model: opus
 effort: high
 max-windows: 2
+spend: 5
 after: api-client-tests-16
 ---
 Migrate every call in src/api/ from the v1 client to the v2 client. ...
@@ -634,6 +691,7 @@ one. The database is the only source of truth; files are not watched.
    ```
    claude-nightshift -f ~/.local/share/claude-backlog/tasks/<id>/prompt.md \
      -t <threshold> -w <max-windows> [-m <model>] [-e <effort>] \
+     --run-id <id>-<run> [--spend <budget> [--spend-share <parallel>]] \
      --status-file ~/.local/share/claude-backlog/tasks/<id>/nightshift-status.md \
      --log-file ~/.local/share/claude-backlog/tasks/<id>/logs/<run>.log
    ```
@@ -649,7 +707,7 @@ one. The database is the only source of truth; files are not watched.
 | `1` | failure: Claude error, retries used up | attention | next task |
 | `2` | bad arguments | attention | next task |
 | `3` | weekly threshold reached | queued (deferred, keeps its place) | **stop** |
-| `4` | windows for this attempt used up, unfinished | queued (attempt +1) | next task |
+| `4` | windows or budget for this attempt used up, unfinished | queued (attempt +1) | next task |
 | `5` | usage unreadable (new in nightshift) | queued (not counted) | **stop** |
 | `130` | stopped by me, or because I came back | queued (not counted) | **stop** |
 | other | killed or crashed | attention | next task |
@@ -667,8 +725,8 @@ is lost and the branch always shows the full state.
 
 ### Tasks on the same project
 
-Tasks run one at a time, but each starts from the base branch as it is
-when the task starts. Two tasks on the same project therefore do not see
+Each task starts from the base branch as it is when the task starts,
+also when several tasks run at once. Two tasks on the same project therefore do not see
 each other's work unless the first one has been merged by then, and their
 branches can conflict when both are merged. Five rules handle that:
 
@@ -859,7 +917,7 @@ claude-backlog list [-a] [-C DIR]     the queue in run order, plus running and a
                                      -a adds done and archived; -C DIR shows the tasks of
                                      that repository that are not merged yet
 claude-backlog go [--until HH:MM]    same as Run now
-claude-backlog stop [--now]          stop after the current task, or now
+claude-backlog stop [--now]          stop after the running tasks, or now
 claude-backlog export ID             write the task as a task file
 claude-backlog report                print the latest run report
 claude-backlog template              print the prompt template (the /backlog skill follows it)
@@ -942,7 +1000,7 @@ by others.
 ## 13. Out of scope
 
 - Starting the queue at set times (timers, run windows).
-- Running tasks in parallel, or on more than one machine.
+- Running tasks on more than one machine.
 - Usage or budget logic of its own (nightshift's job).
 - Dependencies between tasks beyond "start after one other task"
   (section 6, "Tasks on the same project").
@@ -977,3 +1035,11 @@ Decided in review (2026-10-18):
    branch to merge is reviewed like any other. Chaining every task on a
    project by default was rejected: one failed task would hold up the
    rest, and no branch could be merged on its own.
+8. **Several tasks at once** (2026-10-19): a "Parallel tasks" setting,
+   default 1. Each attempt has a budget in weekly percent, "auto" by
+   default (what is left below the threshold, split evenly between the
+   slots), which can be set per task. nightshift measures and enforces it
+   through a shared ledger (`--run-id`, `--spend`), since usage and budget
+   logic is nightshift's. Tasks of the same git repository may run
+   together, each in its own worktree; tasks in the same non-git folder
+   may not.

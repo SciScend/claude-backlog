@@ -179,3 +179,21 @@ def test_settings_defaults_and_validation(conn):
                 {"nope": 1}, {"max_windows": "many"}, {"away_enabled": "yes"}):
         with pytest.raises(ValueError):
             settings.update(conn, bad)
+
+
+def test_a_task_budget_is_a_percentage_or_auto(conn, plain_dir):
+    t = tasks.create(conn, "x", plain_dir, spend="5%")
+    assert t["spend"] == "5"
+    assert tasks.update(conn, t["id"], {"spend": "auto"})["spend"] == "auto"
+    assert tasks.update(conn, t["id"], {"spend": "2.50"})["spend"] == "2.5"
+    assert tasks.update(conn, t["id"], {"spend": ""})["spend"] is None
+    for bad in ("0", "101", "lots"):
+        with pytest.raises(tasks.TaskError):
+            tasks.update(conn, t["id"], {"spend": bad})
+
+
+def test_task_files_carry_the_budget(conn, plain_dir):
+    kwargs = tasks.parse_task_file(f"---\nproject: {plain_dir}\nspend: 4\n---\nDo it\n")
+    t = tasks.create(conn, **kwargs)
+    assert t["spend"] == "4"
+    assert "spend: 4\n" in tasks.format_task_file(t)

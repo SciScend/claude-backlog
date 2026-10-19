@@ -164,6 +164,25 @@ Each attempt at a task may use two 5-hour windows by default. A task that is
 not finished goes back to its place in the queue and is tried again, up to
 three attempts, after which it needs your attention.
 
+### Several tasks at once
+
+"Parallel tasks" in Settings (default 1) says how many tasks run at the same
+time. They share the same 5-hour window and weekly pool, so they do not get
+more usage between them, but a long task no longer holds up the short ones.
+Tasks of the same repository can run together, each in its own worktree;
+two tasks in the same folder outside git never do.
+
+Each attempt has a budget, a share of the weekly pool: "auto" (the default)
+splits what is left below the stop threshold evenly between the parallel
+tasks, a number such as `5` caps the attempt at 5% of the week, and empty
+means no budget of its own. Set the default in Settings and change it per
+task (`add -s 5`, `spend: 5` in a task file, or the task panel).
+claude-nightshift measures what each attempt spends (`--run-id`, `--spend`)
+and stops an attempt that has spent its budget; it goes back to the queue
+like one that used up its windows. The running card and the run report show
+what each attempt spent. It is an estimate: usage comes in whole percent,
+and your own use of Claude while tasks run counts towards them.
+
 ### Results
 
 Finished tasks appear under **Done**, marked "new" until you open them. The
@@ -244,11 +263,11 @@ mind when you write tasks.
 claude-backlog install [--phone]     install the service, the /backlog skill and a launcher
 claude-backlog uninstall             remove them (your tasks stay)
 claude-backlog open                  open the board in the browser
-claude-backlog add [-C DIR] [-p high|normal|low] [-t TITLE] [--hold] [--after ID] PROMPT | FILE | -
+claude-backlog add [-C DIR] [-p high|normal|low] [-t TITLE] [-s PCT|auto] [--hold] [--after ID] PROMPT | FILE | -
 claude-backlog list [-a] [-C DIR]    the queue, what runs, what needs attention;
                                      -C: the tasks of DIR's repository not merged yet
 claude-backlog go [--until HH:MM]    start the queue now
-claude-backlog stop [--now]          stop after the current task, or now
+claude-backlog stop [--now]          stop after the running tasks, or now
 claude-backlog export ID             print a task as a task file
 claude-backlog report                print the latest run report
 claude-backlog template              print the prompt template

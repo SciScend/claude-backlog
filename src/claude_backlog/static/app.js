@@ -14,7 +14,7 @@ let openTaskId = null;
 let openTab = "overview";
 let detail = null;
 let logState = { run: null, offset: 0, text: "" };
-let tailCache = { taskId: null, text: "" };
+const tailCache = {}; // task id -> the last lines of its log
 
 // --- helpers ----------------------------------------------------------------
 
@@ -149,7 +149,10 @@ function renderHeader() {
   $("#run-menu-btn").disabled = busy && runner.trigger !== "away";
   $("#stop-wrap").hidden = !busy;
   $("#stop").disabled = runner.state === "stopping";
-  $("#stop").textContent = runner.stop_mode === "after" ? "Stopping after this task" : "Stop after this task";
+  const several = (runner.tasks || []).length > 1;
+  $("#stop").textContent = runner.stop_mode === "after"
+    ? (several ? "Stopping after these tasks" : "Stopping after this task")
+    : (several ? "Stop after these tasks" : "Stop after this task");
 
   $("#status-line").innerHTML = statusLine();
   $("#status-line").classList.toggle("busy", busy);
@@ -168,13 +171,14 @@ function statusLine() {
   const { runner, tasks } = state;
   const byId = Object.fromEntries(tasks.map((t) => [t.id, t]));
   if (runner.state !== "idle") {
-    const task = byId[runner.task_id];
+    const working = (runner.tasks || []).map((r) => byId[r.task_id]).filter(Boolean);
     const why = runner.trigger === "away" ? "because you are away" : "with Run now";
-    let line = task
-      ? `Working on <span class="live">${esc(task.title)}</span>, started ${why}.`
+    const names = working.map((t) => `<span class="live">${esc(t.title)}</span>`);
+    let line = names.length
+      ? `Working on ${names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names[0]}, started ${why}.`
       : `Starting the queue ${why}.`;
     if (runner.until) line += ` No new task after ${when(runner.until)}.`;
-    if (runner.stop_mode === "after") line += " Stops after this task.";
+    if (runner.stop_mode === "after") line += working.length > 1 ? " Stops after these tasks." : " Stops after this task.";
     if (runner.stop_mode === "now") line += " Stopping now.";
     return line;
   }
@@ -259,17 +263,26 @@ function ticket(task) {
   </article>`;
 }
 
+// What a running attempt has spent of the weekly pool, against its budget.
+function spentText(run) {
+  if (!run || run.spent == null) return "";
+  const spent = `${Number(run.spent).toFixed(1)}%`;
+  return run.cap != null ? `spent ${spent} of ${Number(run.cap).toFixed(1)}%` : `spent ${spent} of the week`;
+}
+
 function runningTicket(task) {
-  const runner = state.runner;
-  const started = runner.task_id === task.id && runner.task_started_at ? runner.task_started_at : task.updated_at;
+  const run = (state.runner.tasks || []).find((r) => r.task_id === task.id);
+  const started = run && run.started_at ? run.started_at : task.updated_at;
+  const spent = spentText(run);
   return `<article class="ticket running" data-id="${esc(task.id)}" tabindex="0">
     <div class="light"></div>
     <div class="inner">
       <div class="title">${esc(task.title)}</div>
       <div class="clock" data-since="${started}">${clock(nowSeconds() - started)}</div>
       <div class="meta"><span>${esc(task.project_name)}</span><span>attempt ${task.attempts + 1}</span>
+        ${spent ? `<span>${esc(spent)}</span>` : ""}
         ${task.branch ? `<span>${esc(task.branch)}</span>` : ""}</div>
-      <div class="tail" id="tail">${esc(tailCache.taskId === task.id ? tailCache.text : "")}</div>
+      <div class="tail" data-tail="${esc(task.id)}">${esc(tailCache[task.id] || "")}</div>
     </div>
   </article>`;
 }
@@ -300,20 +313,22 @@ function renderBoard() {
   }
   $("#queue-empty").hidden = counts.queue > 0;
   $(".col-queue").classList.toggle("is-empty", counts.queue === 0);
-  if (running.length) pollTail(running[0].id);
+  for (const t of running) pollTail(t.id);
 }
 
+const tailBusy = new Set();
+
 async function pollTail(taskId) {
-  if (pollTail.busy) return;
-  pollTail.busy = true;
+  if (tailBusy.has(taskId)) return;
+  tailBusy.add(taskId);
   try {
     const data = await api("GET", `/api/tasks/${encodeURIComponent(taskId)}/log`);
     const lines = data.text.trimEnd().split("\n").slice(-8).join("\n");
-    tailCache = { taskId, text: lines };
-    const el = $("#tail");
+    tailCache[taskId] = lines;
+    const el = $(`.tail[data-tail="${CSS.escape(taskId)}"]`);
     if (el) el.textContent = lines;
   } catch (err) { /* the next refresh tries again */ }
-  pollTail.busy = false;
+  tailBusy.delete(taskId);
 }
 
 // Clocks on the running ticket tick every second without a refresh.
@@ -322,8 +337,8 @@ setInterval(() => {
 }, 1000);
 
 setInterval(() => {
-  const running = state && state.tasks.find((t) => t.status === "running");
-  if (running && document.visibilityState === "visible") pollTail(running.id);
+  if (!state || document.visibilityState !== "visible") return;
+  for (const t of state.tasks) if (t.status === "running") pollTail(t.id);
 }, 5000);
 
 // --- moving tasks -----------------------------------------------------------
@@ -653,6 +668,7 @@ function editHtml() {
       <label>Model <input name="model" value="${esc(t.model || "")}" placeholder="Default" ${locked ? "disabled" : ""}></label>
       <label>Effort <select name="effort" ${locked ? "disabled" : ""}>${opt("", "Default", t.effort)}${["low", "medium", "high", "xhigh", "max"].map((e) => opt(e, e, t.effort)).join("")}</select></label>
       <label>5-hour windows per attempt <input name="max_windows" value="${esc(t.max_windows || "")}" placeholder="Default" ${locked ? "disabled" : ""}></label>
+      <label>Budget per attempt, weekly % <input name="spend" value="${esc(t.spend || "")}" placeholder="Default" title="A percentage of the weekly pool, or auto" ${locked ? "disabled" : ""}></label>
       <label>Attempts <input name="max_attempts" type="number" min="1" value="${esc(t.max_attempts || "")}" placeholder="Default" ${locked ? "disabled" : ""}></label>
       <label>Stop at weekly % <input name="threshold" type="number" min="1" max="100" value="${esc(t.threshold || "")}" placeholder="Default" ${locked ? "disabled" : ""}></label>
     </div>
@@ -1356,6 +1372,8 @@ async function openSettings() {
   form.draft_model.value = s.draft_model;
   form.draft_effort.value = s.draft_effort;
   form.max_windows.value = s.max_windows;
+  form.spend.value = s.spend;
+  form.parallel.value = s.parallel;
   form.max_attempts.value = s.max_attempts;
   form.project_roots.value = s.project_roots.join("\n");
   form.tailscale_login.value = s.tailscale_login;
@@ -1397,6 +1415,8 @@ function setupSettings() {
       draft_model: form.draft_model.value,
       draft_effort: form.draft_effort.value,
       max_windows: form.max_windows.value,
+      spend: form.spend.value,
+      parallel: Number(form.parallel.value),
       max_attempts: Number(form.max_attempts.value),
       project_roots: form.project_roots.value.split("\n").map((s) => s.trim()).filter(Boolean),
       tailscale_login: form.tailscale_login.value,

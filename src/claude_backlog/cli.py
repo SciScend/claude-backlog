@@ -63,6 +63,9 @@ def build_parser() -> argparse.ArgumentParser:
                    choices=["low", "medium", "high", "xhigh", "max"])
     p.add_argument("-w", "--max-windows", default=None,
                    help="5-hour windows one attempt may use: a number or 'auto'")
+    p.add_argument("-s", "--spend", default=None, metavar="PCT|auto",
+                   help="how much of the weekly pool one attempt may spend, in "
+                        "percent, or 'auto' (an even share of what is left)")
 
     p = sub.add_parser("list", help="show the queue and what needs attention")
     p.add_argument("-a", "--all", action="store_true", help="include done and archived")
@@ -73,9 +76,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("go", help="start working through the queue now")
     p.add_argument("--until", metavar="HH:MM", default=None,
                    help="start no new task after this time")
-    p = sub.add_parser("stop", help="stop after the current task")
+    p = sub.add_parser("stop", help="stop after the running tasks")
     p.add_argument("--now", action="store_true",
-                   help="stop the current task too (it goes back to the queue)")
+                   help="stop the running tasks too (they go back to the queue)")
 
     p = sub.add_parser("export", help="print a task as a task file")
     p.add_argument("task_id")
@@ -130,7 +133,7 @@ def cmd_add(args, conn) -> int:
             kwargs["project_dir"] = args.project
     else:
         kwargs = {"prompt": source, "project_dir": default_project or str(Path.cwd())}
-    for key in ("title", "priority", "model", "effort", "max_windows"):
+    for key in ("title", "priority", "model", "effort", "max_windows", "spend"):
         value = getattr(args, key)
         if value:
             kwargs[key] = value

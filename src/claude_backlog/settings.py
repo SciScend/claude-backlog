@@ -43,7 +43,13 @@ DEFAULTS = {
     "model": "",
     "effort": "",
     "max_windows": "2",
+    # How much of the weekly pool one attempt may spend: a percentage, "auto"
+    # (what is left below the threshold, split between the parallel tasks)
+    # or empty (no budget of its own).
+    "spend": "auto",
     "max_attempts": 3,
+    # How many tasks run at the same time.
+    "parallel": 1,
     # Writing a task's prompt with Claude, separate from the task model (which
     # is for runs only). Empty means Claude Code's own default.
     "draft_model": "sonnet",
@@ -66,6 +72,13 @@ CHOICES = {
 }
 
 
+def _is_percent(value) -> bool:
+    try:
+        return 0 < float(value) <= 100
+    except ValueError:
+        return False
+
+
 def _validate(key, value):
     if key not in DEFAULTS:
         raise ValueError(f"unknown setting {key!r}")
@@ -78,7 +91,7 @@ def _validate(key, value):
             raise ValueError(f"{key} must be a number")
         if key == "threshold" and not 1 <= value <= 100:
             raise ValueError("threshold must be between 1 and 100")
-        if key in ("away_minutes", "max_attempts") and value < 1:
+        if key in ("away_minutes", "max_attempts", "parallel") and value < 1:
             raise ValueError(f"{key} must be at least 1")
         value = type(default)(value)
     elif isinstance(default, list):
@@ -90,6 +103,8 @@ def _validate(key, value):
         value = value.strip()
         if key == "max_windows" and value and value != "auto" and not value.isdigit():
             raise ValueError("max_windows must be a number or 'auto'")
+        if key == "spend" and value and value != "auto" and not _is_percent(value):
+            raise ValueError("spend must be a percentage, 'auto' or empty")
     if key in CHOICES and value not in CHOICES[key]:
         raise ValueError(f"{key} must be one of {sorted(CHOICES[key])}")
     return value
