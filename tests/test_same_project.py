@@ -374,3 +374,98 @@ def test_cli_lists_the_unmerged_tasks_of_a_repository(conn, repo, plain_dir, cap
     assert "next" in out and "queued" in out
     assert cli.main(["list", "-C", str(plain_dir)]) == 0
     assert "not a git repository" in capsys.readouterr().out
+
+
+# --- "Merge into <base branch>" ---------------------------------------------------
+
+
+def merge_state(client, task_id):  # noqa: F811
+    return client.get(f"/api/tasks/{task_id}").json()["merge"]
+
+
+def merge_action(client, task_id, **extra):  # noqa: F811
+    return client.post(f"/api/tasks/{task_id}/action", json={"action": "merge", **extra})
+
+
+def test_merge_from_the_board(client, conn, repo):  # noqa: F811
+    one = finished(conn, repo, "one", {"one.txt": "1\n"})
+    state = merge_state(client, one["id"])
+    assert state == {"base": "main", "ok": True, "reason": None, "code": None}
+    tip = git(repo, "rev-parse", one["branch"])
+    r = merge_action(client, one["id"], tip=tip)
+    assert r.status_code == 200, r.text
+    assert r.json()["base"] == "main"
+    assert r.json()["commit"] == git(repo, "rev-parse", "--short", "HEAD")
+    # A merge commit, with the task's title in its message, on main.
+    assert git(repo, "rev-parse", "HEAD^2") == tip
+    assert git(repo, "log", "-1", "--format=%B").startswith(f"Merge {one['branch']}\n\none")
+    assert git(repo, "status", "--porcelain") == ""
+    assert cards_by_title(client)["one"]["merged"] is True
+    assert merge_state(client, one["id"]) is None
+    assert merge_action(client, one["id"]).status_code == 400
+
+
+def test_merge_refuses_when_the_checkout_is_not_ready(client, conn, repo):  # noqa: F811
+    one = finished(conn, repo, "one", {"one.txt": "1\n"})
+    head = git(repo, "rev-parse", "HEAD")
+
+    def refused(code):
+        assert merge_state(client, one["id"])["code"] == code
+        r = merge_action(client, one["id"])
+        assert r.status_code == 400
+        assert git(repo, "rev-parse", "HEAD") == head
+        return r.json()["error"]
+
+    # Uncommitted changes to a tracked file; an untracked file is fine.
+    (repo / "notes.txt").write_text("mine\n")
+    (repo / "README.md").write_text("edited\n")
+    assert "1 file has uncommitted changes" in refused("dirty")
+    assert (repo / "README.md").read_text() == "edited\n"
+    git(repo, "checkout", "README.md")
+    # Another branch checked out.
+    git(repo, "switch", "-q", "-c", "other")
+    assert "other is checked out, not main" in refused("checkout")
+    git(repo, "switch", "-q", "main")
+    # A merge in progress (git keeps MERGE_HEAD until it is finished).
+    (repo / ".git" / "MERGE_HEAD").write_text(head + "\n")
+    assert "A merge is not finished" in refused("in-progress")
+    (repo / ".git" / "MERGE_HEAD").unlink()
+    assert merge_state(client, one["id"])["ok"] is True
+    # The branch moved after the user looked at it.
+    r = merge_action(client, one["id"], tip=head)
+    assert r.status_code == 400 and "changed since" in r.json()["error"]
+
+
+def test_merge_refuses_a_conflict(client, conn, repo):  # noqa: F811
+    one = finished(conn, repo, "one", {"README.md": "one\n"})
+    (repo / "README.md").write_text("changed on main\n")
+    git(repo, "commit", "-q", "-am", "main moves on")
+    head = git(repo, "rev-parse", "HEAD")
+    assert merge_state(client, one["id"])["code"] == "conflict"
+    r = merge_action(client, one["id"])
+    assert r.status_code == 400 and "README.md" in r.json()["error"]
+    assert git(repo, "rev-parse", "HEAD") == head
+    assert git(repo, "status", "--porcelain") == ""
+
+
+def test_a_failed_merge_is_undone(client, conn, repo):  # noqa: F811
+    one = finished(conn, repo, "one", {"one.txt": "1\n"})
+    head = git(repo, "rev-parse", "HEAD")
+    hook = repo / ".git" / "hooks" / "pre-merge-commit"
+    hook.write_text("#!/bin/sh\necho 'not today' >&2\nexit 1\n")
+    hook.chmod(0o755)
+    r = merge_action(client, one["id"])
+    assert r.status_code == 409
+    assert "undone" in r.json()["error"] and "not today" in r.json()["error"]
+    assert git(repo, "rev-parse", "HEAD") == head
+    assert git(repo, "status", "--porcelain") == ""
+    assert not (repo / ".git" / "MERGE_HEAD").exists()
+
+
+def test_merge_is_only_offered_for_finished_tasks(client, conn, repo):  # noqa: F811
+    one = finished(conn, repo, "one", {"one.txt": "1\n"})
+    tasks.set_status(conn, one["id"], "hold")
+    assert merge_state(client, one["id"]) is None
+    assert merge_action(client, one["id"]).status_code == 400
+    tasks.set_status(conn, one["id"], "attention")
+    assert merge_state(client, one["id"])["ok"] is True

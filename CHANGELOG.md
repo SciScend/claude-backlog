@@ -49,6 +49,13 @@ First version.
   merges the other branch into a branch of its own and resolves the
   conflicts. A branch contained in another finished branch is shown as
   part of it instead of being checked on its own.
+- Merge into <base branch>: a button at the top of a finished task's
+  panel merges its branch in the project folder (`git merge --no-ff`, your
+  hooks and git identity, never a push), after a confirmation. It is
+  offered only when the base branch is checked out, no tracked file has
+  uncommitted changes, nothing is half merged or rebased, and the merge
+  check finds no conflict; otherwise the panel says what is in the way. A
+  merge that still fails is aborted.
 - Uncommitted changes when a task is added: the new-task form offers
   "Commit now" (the changed files, a commit message, your hooks and git
   identity); the `/backlog` skill offers to commit them first; `add` prints

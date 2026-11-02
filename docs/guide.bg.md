@@ -258,7 +258,7 @@ claude-backlog --help          # всички команди
 
 | Таб | Какво показва |
 |---|---|
-| **Overview** | Статус, приоритет, проект, зависимост ("Starts after ..."), опитите (всеки със свой лог), `SUMMARY.md` на Claude, commits на branch-а, предупреждения за конфликти, команда за merge. Тук са и действията: **Run next**, **Put on hold**, **Add to the queue**, **Run again**, **Archive**, **Delete** и **Delete the branch**. |
+| **Overview** | Статус, приоритет, проект, зависимост ("Starts after ..."), опитите (всеки със свой лог), `SUMMARY.md` на Claude, commits на branch-а, предупреждения за конфликти, команда за merge. Тук са и действията: **Merge into main**, **Run next**, **Put on hold**, **Add to the queue**, **Run again**, **Archive**, **Delete** и **Delete the branch**. |
 | **Prompt and settings** | Prompt-ът (можеш да го четеш и променяш, докато задачата не работи), заглавието, моделът, effort, брой прозорци и опити за тази задача. Някои полета (проект, base branch, "Start after") се заключват, щом задачата е започнала, защото от тях зависи нейният branch. |
 | **Log** | Логът на опита - следи се на живо, докато задачата тече. |
 | **Changes** | Diff-ът на branch-а спрямо началната му точка. |
@@ -669,8 +669,25 @@ git -C ~/projects/site merge backlog/migrate-the-api-client-to-v2-1
 ```
 
 Сам решаваш дали да я изпълниш, да направиш cherry-pick, да поискаш промени
-или да изтриеш branch-а (**Delete the branch**). След merge картата се
-означава "merged". Ако не си доволен, **Archive** маха worktree-то и запазва
+или да изтриеш branch-а (**Delete the branch**).
+
+Вместо командата можеш да натиснеш **Merge into main** (името е на base
+branch-а на задачата) най-горе в панела - и от телефона. Бутонът прави
+`git merge --no-ff` в папката на проекта, с твоите git hooks и твоята git
+идентичност, и никога не прави push. Показва се само когато merge-ът е
+безопасен:
+
+- base branch-ът е checkout-нат в папката на проекта;
+- няма tracked файлове с некомитнати промени (untracked файловете не
+  пречат);
+- няма незавършен merge, rebase или cherry-pick;
+- проверката за конфликти не намира конфликт.
+
+Ако нещо от това не е изпълнено, панелът казва какво точно пречи. Ако
+merge-ът все пак се провали (например hook го откаже), той се отменя
+(`git merge --abort`) и нищо не се променя.
+
+След merge картата се означава "merged". Ако не си доволен, **Archive** маха worktree-то и запазва
 branch-а, за да можеш да се върнеш към него.
 
 Ако командата `git merge` даде конфликт, виж по-долу.

@@ -201,6 +201,15 @@ branch, every attempt with its log, and the command to merge the branch:
 git -C ~/projects/site merge backlog/migrate-the-api-client-to-v2-1
 ```
 
+Or press **Merge into main** (the task's base branch) at the top of the
+panel, also from the phone. It merges with a merge commit, your git hooks
+and your git identity, and never pushes. The board offers it only when the
+merge is safe: the base branch is checked out in the project folder, no
+tracked file has uncommitted changes, no merge or rebase is unfinished
+there, and the merge check finds no conflict. Otherwise the panel says
+which of these is in the way. If the merge still fails (a hook says no),
+it is aborted and nothing changes.
+
 Archiving a task removes its worktree and keeps the branch. Every run also
 writes a report (`claude-backlog report`) and shows a desktop notification
 when the queue stops.
@@ -255,7 +264,9 @@ mind when you write tasks.
 
 - Each task works in a separate git worktree on its own branch. Claude is
   told not to push, merge or touch anything outside the worktree and its
-  task folder, and the branch is only merged when you do it.
+  task folder, and the branch is only merged when you do it (with git, or
+  with the board's Merge button, which checks first that your checkout is
+  clean and the merge has no conflict).
 - When Claude writes a task's prompt on the board, it gets no tools and
   no MCP servers (`--tools ""`, `--strict-mcp-config`): it only reads the
   outline of the project that the board puts in the request.

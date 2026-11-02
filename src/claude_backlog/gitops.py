@@ -28,6 +28,9 @@ __all__ = [
     "diff",
     "remove_worktree",
     "delete_branch",
+    "operation_in_progress",
+    "tracked_changes",
+    "merge_into_head",
 ]
 
 # Used for commits only when the repository has no identity of its own.
@@ -309,3 +312,66 @@ def remove_worktree(repo_root, path) -> None:
 def delete_branch(repo_root, branch) -> None:
     if branch_exists(repo_root, branch):
         git("branch", "-D", branch, cwd=repo_root)
+
+
+# Files git keeps while a merge, cherry-pick, revert or rebase is unfinished.
+OPERATIONS = {
+    "MERGE_HEAD": "a merge",
+    "CHERRY_PICK_HEAD": "a cherry-pick",
+    "REVERT_HEAD": "a revert",
+    "rebase-merge": "a rebase",
+    "rebase-apply": "a rebase or git am",
+}
+
+MERGE_TIMEOUT = 600  # seconds, for the repository's hooks
+
+
+def operation_in_progress(repo_root) -> str | None:
+    """What is unfinished in the user's checkout ("a merge", ...), or None."""
+    for name, what in OPERATIONS.items():
+        path = Path(repo_root, git("rev-parse", "--git-path", name, cwd=repo_root))
+        if path.exists():
+            return what
+    return None
+
+
+def tracked_changes(repo_root) -> int:
+    """How many tracked files have uncommitted changes, staged or not.
+
+    Untracked files do not count: a merge never changes them, and git
+    refuses to merge when it would overwrite one.
+    """
+    out = git("status", "--porcelain", "--untracked-files=no", cwd=repo_root,
+              check=False)
+    return len([line for line in out.splitlines() if line.strip()])
+
+
+def merge_into_head(repo_root, branch, message) -> str:
+    """Merge ``branch`` into the branch checked out in the user's own checkout.
+
+    Always with a merge commit (``--no-ff``), with the repository's hooks and
+    the user's git identity, never a fallback one. When the merge fails for
+    any reason it is aborted, so the checkout is left as it was. Returns the
+    short hash of the merge commit.
+    """
+    if not _has_user_identity(repo_root):
+        raise GitError(IDENTITY_HELP)
+    try:
+        result = subprocess.run(
+            ["git", "-c", "user.useConfigOnly=true", "merge", "--no-ff", "--no-edit",
+             "-m", message, branch],
+            cwd=repo_root, capture_output=True, text=True, errors="replace",
+            stdin=subprocess.DEVNULL, timeout=MERGE_TIMEOUT,
+        )
+        failed = result.returncode != 0
+        output = "\n".join(s for s in (result.stdout.strip(), result.stderr.strip()) if s)
+    except subprocess.TimeoutExpired:
+        failed, output = True, f"git merge did not finish in {MERGE_TIMEOUT} seconds."
+    if failed:
+        if operation_in_progress(repo_root) == "a merge":
+            git("merge", "--abort", cwd=repo_root, check=False)
+        if "auto-detection is disabled" in output:
+            raise GitError(IDENTITY_HELP)
+        raise GitError("The merge failed and was undone; nothing changed."
+                       + (f" Git said:\n{output}" if output else ""))
+    return git("rev-parse", "--short", "HEAD", cwd=repo_root)

@@ -35,6 +35,7 @@ from claude_backlog import (
     db,
     draft,
     gitops,
+    merging,
     paths,
     report,
     runner,
@@ -347,6 +348,7 @@ def _detail(svc: Service, task_id) -> dict:
         "files": [],
         "task_dir": str(paths.task_dir(task_id)),
         "merge_command": None,
+        "merge": None,
     }
     if task["branch"] and task["repo_root"]:
         detail["commits"] = gitops.commits(task["repo_root"], task["base_commit"],
@@ -354,6 +356,10 @@ def _detail(svc: Service, task_id) -> dict:
         detail["files"] = gitops.diff_stat(task["repo_root"], task["base_commit"],
                                            task["branch"])
         detail["merge_command"] = f"git -C {task['repo_root']} merge {task['branch']}"
+        try:
+            detail["merge"] = merging.check(task)
+        except gitops.GitError:
+            detail["merge"] = None
     return detail
 
 
@@ -426,6 +432,10 @@ def task_action(request, data):
     elif action == "resolve":
         # "Update with Claude" (no "with") or "Combine with Claude".
         return {"task": conflicts.follow_up(conn, task_id, data.get("with") or None)}
+    elif action == "merge":
+        # "Merge into <base branch>": only when the checks pass (merging.py).
+        result = merging.merge(conn, task_id, data.get("tip") or None)
+        return {"task": tasks.get(conn, task_id), **result}
     elif action == "redraft":
         tasks.start_draft(conn, task_id)
         svc.start_draft(task_id)

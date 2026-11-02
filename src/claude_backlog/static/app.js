@@ -515,7 +515,9 @@ const STATUS_NAMES = { drafting: "Claude is writing the prompt", hold: "On hold"
 
 function overviewHtml() {
   const { task, runs, commits } = detail;
+  const merge = detail.merge;
   const actions = [];
+  if (merge && merge.ok) actions.push(["merge", `Merge into ${merge.base}`]);
   if (task.status === "queued") actions.push(["run-next", "Run next"], ["hold", "Put on hold"]);
   if (task.status === "hold" && task.draft_error) actions.push(["redraft", "Retry the draft"], ["write", "Write it myself"]);
   else if (task.status === "hold") actions.push(["queue", "Add to the queue"], ["run-next", "Run next"]);
@@ -531,7 +533,7 @@ function overviewHtml() {
     ${task.note ? `<p class="note-box">${esc(task.note)}</p>` : ""}
     ${task.status === "drafting" ? '<p class="drafting-mark">Claude is writing the prompt from your description. This usually takes 10 to 20 seconds.</p>' : ""}
     ${task.draft_error ? `<p class="note-box">${esc(task.draft_error)}<br>${task.draft_retry_at ? `${esc(draftRetryText(task))} Or retry the draft now, or write the prompt yourself.` : "Retry the draft, or write the prompt yourself."}</p>` : ""}
-    <div class="actions-bar">${actions.map(([a, label]) => `<button class="btn small${a === "delete" ? " danger" : ""}" data-action="${a}">${label}</button>`).join("")}</div></section>`);
+    <div class="actions-bar">${actions.map(([a, label]) => `<button class="btn small${a === "delete" ? " danger" : a === "merge" ? " primary" : ""}" data-action="${a}">${esc(label)}</button>`).join("")}</div></section>`);
   if (task.questions && task.questions.length && task.status !== "running") parts.push(questionsHtml(task));
   parts.push(overlapsHtml(task));
   if (task.description && (task.status === "drafting" || task.draft_error)) {
@@ -543,6 +545,7 @@ function overviewHtml() {
       <p><span class="mono">${esc(task.branch)}</span>, from ${esc(task.base_ref || task.base_branch || "")} at <span class="mono">${esc((task.base_commit || "").slice(0, 10))}</span>. ${commits.length} commit${commits.length === 1 ? "" : "s"}.</p>
       ${task.base_ref ? `<p class="hint">That is the branch of "${esc(task.after_title || task.after_task || "")}", not merged into ${esc(task.base_branch || "the base branch")} when this task started, so merging this branch brings in that task's work too.</p>` : ""}
       ${task.worktree ? `<p>Worktree: <span class="mono">${esc(task.worktree)}</span></p>` : ""}
+      ${mergeHintHtml(merge)}
       ${detail.merge_command ? `<div class="copy"><code>${esc(detail.merge_command)}</code><button class="btn small" data-copy="${esc(detail.merge_command)}">Copy</button></div>` : ""}
       ${task.merged ? `<p>Merged into ${esc(task.base_branch || "the base branch")}.</p>` : ""}
       ${task.status !== "running" && task.status !== "queued" ? '<p><button class="btn small danger" data-action="delete-branch">Delete the branch</button></p>' : ""}
@@ -560,6 +563,14 @@ function overviewHtml() {
   if (detail.state_md) parts.push(`<section><h3>Progress notes (STATE.md)</h3><pre>${esc(detail.state_md)}</pre></section>`);
   parts.push(`<section><p class="hint">Task files: <span class="mono">${esc(detail.task_dir)}</span></p></section>`);
   return parts.join("");
+}
+
+// Why "Merge into <base>" is not offered; a conflict is explained in the merge check.
+function mergeHintHtml(merge) {
+  if (!merge) return "";
+  if (merge.ok) return `<p class="hint">Merge into ${esc(merge.base)} (above) merges this branch in your project folder, with a merge commit and your git hooks. Nothing is pushed.</p>`;
+  if (merge.code === "conflict") return "";
+  return `<p class="hint">To merge from the board: ${esc(merge.reason)} Or use the command below.</p>`;
 }
 
 function fileList(files) {
@@ -622,6 +633,16 @@ function questionsHtml(task) {
     <div class="actions-bar"><button class="btn small" data-answers="save">Save answers</button>
       ${held ? '<button class="btn small primary" data-answers="queue">Save answers and queue it</button>' : ""}</div>
   </section>`;
+}
+
+async function mergeBranch() {
+  const { task, commits, merge } = detail;
+  const count = commits.length === 1 ? "1 commit" : `${commits.length} commits`;
+  if (!confirm(`Merge ${task.branch} into ${merge.base}?\n\n${count} of this branch come into ${merge.base} in ${task.repo_root}, with a merge commit. Nothing is pushed.`)) return;
+  const tip = commits.length ? commits[0].sha : null;
+  const result = await act(api("POST", `/api/tasks/${encodeURIComponent(openTaskId)}/action`, { action: "merge", tip }));
+  if (result) toast(`Merged into ${result.base} (${result.commit}). Archive the task to remove its worktree.`);
+  loadDetail();
 }
 
 async function saveAnswers(queue) {
@@ -790,6 +811,7 @@ function setupPanel() {
       selectHint($("#edit-form").prompt);
       return;
     }
+    if (name === "merge") return mergeBranch();
     if (name === "delete" && !confirm("Delete this task? Its branch is kept; the task and its history are removed.")) return;
     if (name === "delete-branch" && !confirm("Delete the branch and its worktree? Commits that are not merged are lost.")) return;
     const messages = { redraft: "Claude is writing the prompt again.", "run-next": "Runs next.", hold: "Put on hold.", queue: "Added to the queue.", retry: "Back in the queue.", archive: "Archived.", delete: "Deleted.", "delete-branch": "Branch deleted." };

@@ -36,7 +36,8 @@ Use Claude as fully as possible while I am away from the computer.
 - A board in the browser shows every task. On it I add tasks, change their
   priority by dragging, watch the running one and read the results.
 - Each task's work lands on its own branch, so I review it as a diff and
-  merge what I want. My working copy is never touched.
+  merge what I want. My working copy is never touched while tasks run; the
+  only change to it is a merge I start myself.
 
 ## 2. Overview
 
@@ -212,8 +213,9 @@ Clicking a card opens a side panel:
   unmerged tasks, with "Start after it";
 - the runs: start, end, result, nightshift exit code, link to the log;
 - the full log of the running attempt, live;
-- buttons: Run next, Hold, Retry, Archive, Delete, Open worktree folder,
-  Copy merge command (section 6, "After a task").
+- buttons: Run next, Hold, Retry, Merge into <base branch>, Archive,
+  Delete, Open worktree folder, Copy merge command (section 6, "After a
+  task").
 
 ### New task form
 
@@ -804,7 +806,7 @@ branches can conflict when both are merged. Five rules handle that:
    Combine, the other task's too), so their cards then say "in the branch
    of <follow-up>". The buttons are left out while another task already
    builds on the branch. Backlog still merges nothing into the base
-   branch.
+   branch on its own.
 
 ### After a task
 
@@ -813,6 +815,26 @@ task the board offers:
 
 - the diff between the base commit and the branch, in the detail panel;
 - Open worktree folder (to try the result, or open it in an editor);
+- Merge into <base branch>, at the top of the panel, after a confirmation
+  that names the branch, the base branch, the folder and the number of
+  commits. It is the only action that writes to the user's own checkout,
+  so it is offered only when nothing can go wrong there, and the server
+  checks again right before merging (`merging.py`):
+  - the task is done or needs attention, and its branch has commits that
+    are not in the base branch yet;
+  - the base branch is checked out in `<repo_root>`;
+  - no merge, cherry-pick, revert or rebase is unfinished there;
+  - no tracked file has uncommitted changes (untracked files are fine: git
+    refuses a merge that would overwrite one);
+  - `git merge-tree` finds no conflict;
+  - the branch is still at the commit the user saw when they confirmed.
+  When a check fails, the panel says which one and why, and the copy
+  command is still there. The merge itself is `git merge --no-ff` with
+  the message "Merge backlog/<id>" and the task title, the repository's
+  hooks and the user's own git identity (no fallback). If it fails for any
+  reason (a hook, a file git will not overwrite, a timeout), it is
+  aborted, so the checkout is as it was. Nothing is pushed, and the task
+  is not archived: the card then says "merged".
 - Copy merge command: `git -C <repo_root> merge backlog/<id>`;
 - Archive, which removes the worktree (`git worktree remove`) but keeps
   the branch; a second button deletes the branch too, after a confirmation.
