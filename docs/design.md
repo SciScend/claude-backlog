@@ -394,8 +394,9 @@ the `/backlog` skill follows it (`claude-backlog template` prints it).
 
 - **New task** opens the new task form (on the phone, the button at the
   bottom of the screen).
-- **Weekly usage bar** with a marker at the stop threshold. Clicking the
-  threshold changes it (the same setting as in Settings). Under it, usage
+- **Weekly usage bar** with a marker at the stop threshold. Dragging the
+  marker (or clicking it to type a value) changes the threshold (the same
+  setting as in Settings). Under it, usage
   in the form of the Claude Code statusline: `5h 12% (2h05m) | 7d 38%
   (3d19h) | STOP at 50%`, each window with the time left until it resets;
   a figure or reset time that nightshift does not report is left out.

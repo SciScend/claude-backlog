@@ -193,8 +193,10 @@ svg.icon {
   border-radius: 2px;
   background: var(--work);
   box-shadow: 0 0 0 2px var(--header);
-  cursor: pointer;
+  cursor: ew-resize;
+  touch-action: none;
 }
+.meter-mark.dragging { width: 6px; margin-left: -3px; }
 
 .meter-mark::after {
   content: "";

@@ -123,8 +123,11 @@ function render() {
 function renderHeader() {
   const { usage, settings, runner, presence, warnings } = state;
   const threshold = settings.threshold;
-  $("#meter-mark").style.left = `${threshold}%`;
-  $("#meter-mark").title = `The queue stops at ${threshold}%. Click to change.`;
+  if (!markDrag) {
+    $("#meter-mark").style.left = `${threshold}%`;
+    $("#meter-mark").setAttribute("aria-valuenow", threshold);
+  }
+  $("#meter-mark").title = `The queue stops at ${threshold}%. Drag to change, or click to type a value.`;
   const fill = $("#meter-fill");
   const text = $("#meter-text");
   if (usage.usage) {
@@ -1460,16 +1463,91 @@ function setupSettings() {
   $("#template-reset").addEventListener("click", () => {
     $("#settings-form").prompt_template.value = state.default_prompt_template;
   });
-  $("#meter-mark").addEventListener("click", async () => {
+  setupMeterMark();
+  $("#away-toggle").addEventListener("change", (e) => {
+    const on = e.target.checked;
+    act(api("PUT", "/api/settings", { away_enabled: on }), on ? "Starts by itself when you are away." : "Starts only when you press Run now.");
+  });
+}
+
+// --- stop threshold marker on the usage bar ---------------------------------
+
+// Set while the marker is being dragged, so a refresh does not move it back.
+let markDrag = null;
+
+function setThreshold(n) {
+  if (n === state.settings.threshold) return;
+  act(api("PUT", "/api/settings", { threshold: n }), `The queue now stops at ${n}%.`);
+}
+
+function setupMeterMark() {
+  const mark = $("#meter-mark");
+  const track = mark.parentElement;
+  const text = $("#meter-text");
+  const valueAt = (clientX) => {
+    const box = track.getBoundingClientRect();
+    const pct = Math.round(((clientX - box.left) / box.width) * 100);
+    return Math.min(100, Math.max(1, pct));
+  };
+  const show = (n) => {
+    mark.style.left = `${n}%`;
+    mark.setAttribute("aria-valuenow", n);
+    text.textContent = `STOP at ${n}%`;
+  };
+
+  mark.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    mark.setPointerCapture(e.pointerId);
+    markDrag = { x: e.clientX, moved: false, value: state.settings.threshold };
+    mark.classList.add("dragging");
+  });
+  mark.addEventListener("pointermove", (e) => {
+    if (!markDrag) return;
+    if (!markDrag.moved && Math.abs(e.clientX - markDrag.x) < 3) return;
+    markDrag.moved = true;
+    markDrag.value = valueAt(e.clientX);
+    show(markDrag.value);
+  });
+  const end = (commit) => {
+    if (!markDrag) return;
+    const { moved, value } = markDrag;
+    markDrag = null;
+    mark.classList.remove("dragging");
+    if (moved) {
+      // Swallow the click that follows a drag, so the prompt does not open.
+      mark.dataset.dragged = "1";
+      setTimeout(() => { delete mark.dataset.dragged; }, 0);
+      if (commit) setThreshold(value);
+    }
+    renderHeader();
+  };
+  mark.addEventListener("pointerup", () => end(true));
+  mark.addEventListener("pointercancel", () => end(false));
+
+  mark.addEventListener("click", () => {
+    if (mark.dataset.dragged) return;
     const value = prompt("Stop the queue when weekly usage reaches (%):", state.settings.threshold);
     if (value === null) return;
     const n = Number(value);
     if (!(n >= 1 && n <= 100)) return toast("Enter a number from 1 to 100.");
-    act(api("PUT", "/api/settings", { threshold: n }), `The queue now stops at ${n}%.`);
+    setThreshold(n);
   });
-  $("#away-toggle").addEventListener("change", (e) => {
-    const on = e.target.checked;
-    act(api("PUT", "/api/settings", { away_enabled: on }), on ? "Starts by itself when you are away." : "Starts only when you press Run now.");
+
+  // Arrow keys move it by 1 (Shift: 5), Home and End go to the ends.
+  mark.addEventListener("keydown", (e) => {
+    const t = Number(mark.getAttribute("aria-valuenow")) || state.settings.threshold;
+    const step = e.shiftKey ? 5 : 1;
+    const next = {
+      ArrowLeft: t - step, ArrowDown: t - step, ArrowRight: t + step, ArrowUp: t + step,
+      Home: 1, End: 100,
+    }[e.key];
+    if (next === undefined) return;
+    e.preventDefault();
+    const n = Math.min(100, Math.max(1, next));
+    show(n);
+    clearTimeout(mark.keyTimer);
+    mark.keyTimer = setTimeout(() => setThreshold(n), 400);
   });
 }
 
