@@ -138,6 +138,8 @@ project: {repo}
 priority: high
 effort: high
 max-windows: 3
+threshold: 100
+next-threshold: 40
 ---
 Migrate every call.
 
@@ -153,6 +155,18 @@ Then run the tests.
     again = tasks.parse_task_file(tasks.format_task_file(task))
     assert again["title"] == "Migrate the client"
     assert again["prompt"] == task["prompt"]
+    assert task["next_threshold"] == 40.0
+    assert again["next_threshold"] == 40.0
+
+
+def test_a_task_can_have_its_own_next_week_threshold(conn, plain_dir):
+    t = tasks.create(conn, "x", plain_dir)
+    assert t["next_threshold"] is None
+    assert tasks.update(conn, t["id"], {"next_threshold": "30"})["next_threshold"] == 30.0
+    assert tasks.update(conn, t["id"], {"next_threshold": ""})["next_threshold"] is None
+    for bad in ("0", "101", "lots"):
+        with pytest.raises(tasks.TaskError):
+            tasks.update(conn, t["id"], {"next_threshold": bad})
 
 
 def test_task_file_without_front_matter_uses_the_default_project(plain_dir):

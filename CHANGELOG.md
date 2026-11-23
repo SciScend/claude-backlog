@@ -35,7 +35,10 @@ First version.
   week with a limit of its own (for example all of this week, at most 50% of
   the next), or go on with the same threshold. With the next week's limit, a
   task that reaches this week's threshold waits for the reset and goes on
-  (nightshift's `--next-threshold`). The usage bar shows both limits.
+  (nightshift's `--next-threshold`). The header shows what happens at the
+  reset, and a click there sets the next week's limit. A task can have a
+  next-week limit of its own ("Next week, stop at %", `next-threshold` in a
+  task file).
 - Several tasks at once: a "Parallel tasks" setting (default 1). Each attempt
   has a budget of the weekly pool ("auto" splits what is left below the
   threshold between the parallel tasks; a percentage per task or as the

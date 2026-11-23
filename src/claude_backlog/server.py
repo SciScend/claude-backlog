@@ -392,7 +392,8 @@ def get_state(request, _):
 def create_task(request, data):
     svc = _svc(request)
     allowed = {"prompt", "project_dir", "title", "priority", "status", "model", "effort",
-               "max_windows", "spend", "threshold", "max_attempts", "base_branch",
+               "max_windows", "spend", "threshold", "next_threshold", "max_attempts",
+               "base_branch",
                "after_task", "description"}
     task = tasks.create(svc.conn(), **{k: v for k, v in data.items() if k in allowed})
     if task["status"] == "drafting":

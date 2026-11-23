@@ -172,15 +172,19 @@ weekly reset" in Settings says what happens then:
 - **Go on with the new week, same threshold**: the queue keeps going, and
   the same limit applies to the new week.
 
+A task can have its own next-week limit too ("Next week, stop at %" in
+its panel, `next-threshold` in a task file). Such a task goes on into the
+next week up to that limit whatever the setting says.
+
 The next week's limit holds for the queue that is running. A queue you
 start later in the next week gets the usual limit again, so set it back
 (for example from 100% to 50%) once the week has turned.
 
 The board header shows usage the way the Claude Code statusline does, with
-the time left until each window resets:
-`5h 12% (2h05m) | 7d 38% (3d19h) | STOP at 50%`, with the next week's
-limit added (`STOP at 100%, next week 50%`) when the queue may go on into
-it.
+the time left until each window resets, and what happens at the weekly
+reset: `5h 12% (2h05m) | 7d 38% (3d19h) | STOP at 100% | next week STOP at
+50%` (or `stop at the reset`, or `new week: same`). Click the last part to
+set the next week's limit.
 
 Each attempt at a task may use two 5-hour windows by default. A task that is
 not finished goes back to its place in the queue and is tried again, up to

@@ -16,7 +16,7 @@ from claude_backlog import paths
 
 __all__ = ["SCHEMA_VERSION", "connect", "transaction", "revision", "now"]
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 MIGRATIONS = {
     1: """
@@ -102,6 +102,10 @@ MIGRATIONS = {
     7: """
     ALTER TABLE tasks ADD COLUMN spend TEXT;
     ALTER TABLE runs ADD COLUMN spent REAL;
+    """,
+    # A task's own threshold for the next week (nightshift's --next-threshold).
+    8: """
+    ALTER TABLE tasks ADD COLUMN next_threshold REAL;
     """,
 }
 

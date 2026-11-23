@@ -120,11 +120,22 @@ function render() {
   if (openTaskId) renderPanel();
 }
 
-// "STOP at 100%", and the next week's limit when the queue may go on into it.
+// "STOP at 100%", and what happens at the weekly reset.
 function stopText(threshold) {
+  return `STOP at ${threshold}%`;
+}
+
+function nextWeekText() {
   const s = state.settings;
-  const next = s.stay_in_week && s.next_week_threshold;
-  return next ? `STOP at ${threshold}%, next week ${next}%` : `STOP at ${threshold}%`;
+  if (!s.stay_in_week) return "new week: same";
+  return s.next_week_threshold ? `next week STOP at ${s.next_week_threshold}%` : "stop at the reset";
+}
+
+// What a task without a next-week threshold of its own does, for its placeholder.
+function nextWeekDefault() {
+  const s = state.settings;
+  if (!s.stay_in_week) return "Default (same as this week)";
+  return s.next_week_threshold ? `Default (${s.next_week_threshold})` : "Default (stop at the reset)";
 }
 
 function renderHeader() {
@@ -147,6 +158,7 @@ function renderHeader() {
       limit("5h", u.five_hour_pct, u.five_hour_resets, now),
       limit("7d", pct, u.weekly_resets, now),
       stopText(threshold),
+      `<button type="button" class="meter-next" id="meter-next" title="What happens at the weekly reset${u.weekly_resets ? ` (in ${esc(duration(u.weekly_resets - now))})` : ""}. Click to set the next week's limit.">${esc(nextWeekText())}</button>`,
     ].filter(Boolean).join(" | ");
   } else {
     fill.style.width = "0";
@@ -701,7 +713,8 @@ function editHtml() {
       <label>5-hour windows per attempt <input name="max_windows" value="${esc(t.max_windows || "")}" placeholder="Default" ${locked ? "disabled" : ""}></label>
       <label>Budget per attempt, weekly % <input name="spend" value="${esc(t.spend || "")}" placeholder="Default" title="A percentage of the weekly pool, or auto" ${locked ? "disabled" : ""}></label>
       <label>Attempts <input name="max_attempts" type="number" min="1" value="${esc(t.max_attempts || "")}" placeholder="Default" ${locked ? "disabled" : ""}></label>
-      <label>Stop at weekly % <input name="threshold" type="number" min="1" max="100" value="${esc(t.threshold || "")}" placeholder="Default" ${locked ? "disabled" : ""}></label>
+      <label>Stop at weekly % <input name="threshold" type="number" min="1" max="100" value="${esc(t.threshold || "")}" placeholder="Default (${esc(state.settings.threshold)})" ${locked ? "disabled" : ""}></label>
+      <label>Next week, stop at % <input name="next_threshold" type="number" min="1" max="100" value="${esc(t.next_threshold || "")}" placeholder="${esc(nextWeekDefault())}" title="Lets the task go on into the next week up to this share of it; reaching this week's threshold first waits for the weekly reset" ${locked ? "disabled" : ""}></label>
     </div>
     <p class="form-error" id="edit-error" hidden></p>
     <div class="actions"><button class="btn primary" type="submit" ${locked ? "disabled" : ""}>Save changes</button></div>
@@ -1482,6 +1495,16 @@ function setupSettings() {
     $("#settings-form").prompt_template.value = state.default_prompt_template;
   });
   setupMeterMark();
+  $("#meter-text").addEventListener("click", (e) => {
+    if (e.target.id !== "meter-next") return;
+    const s = state.settings;
+    const value = prompt("Go on into the next week and stop when its usage reaches (%).\nLeave empty to stop the queue at the weekly reset.",
+      s.stay_in_week ? s.next_week_threshold : "");
+    if (value === null) return;
+    const v = value.trim();
+    act(api("PUT", "/api/settings", { stay_in_week: true, next_week_threshold: v }),
+      v ? `The queue goes on into the next week, up to ${v}%.` : "The queue stops at the weekly reset.");
+  });
   $("#away-toggle").addEventListener("change", (e) => {
     const on = e.target.checked;
     act(api("PUT", "/api/settings", { away_enabled: on }), on ? "Starts by itself when you are away." : "Starts only when you press Run now.");

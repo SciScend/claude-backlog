@@ -398,8 +398,11 @@ the `/backlog` skill follows it (`claude-backlog template` prints it).
   marker (or clicking it to type a value) changes the threshold (the same
   setting as in Settings). Under it, usage
   in the form of the Claude Code statusline: `5h 12% (2h05m) | 7d 38%
-  (3d19h) | STOP at 50%`, each window with the time left until it resets;
-  a figure or reset time that nightshift does not report is left out.
+  (3d19h) | STOP at 50% | stop at the reset`, each window with the time
+  left until it resets; a figure or reset time that nightshift does not
+  report is left out. The last part says what happens at the weekly reset
+  (`stop at the reset`, `next week STOP at 40%` or `new week: same`); a
+  click on it sets the next week's limit.
 - **Status line**: idle / running (started by me or because I was away) /
   stopped and why.
 - **Starts when away: ON / OFF**, one click to switch. OFF is for days
@@ -586,6 +589,12 @@ So the setting "At the weekly reset" has three choices:
 - **Go on with the new week, same threshold**: no `--week-of`
   (`stay_in_week` off).
 
+A task may have a next-week threshold of its own (`next_threshold`, "Next
+week, stop at %" in its panel, `next-threshold` in a task file). It
+replaces Y for that task, and such a task goes on into the next week even
+when the setting is "Stop the queue" or "same threshold". Its placeholder
+in the panel shows what the task gets without it.
+
 Y belongs to the running queue only. A queue started later in the next week
 gets X again, so after setting X to 100% for the end of a week I set it back
 when the week has turned. A limit kept per calendar week, so that a later
@@ -665,7 +674,7 @@ be changed by dragging without rewriting files.
 | `questions` | Claude's questions from the draft (JSON: question, assumption, blocking, answer) |
 | `priority` | 1 high, 2 normal, 3 low |
 | `position` | order within the priority group (a float, so a drop between two cards only changes the dropped one) |
-| `model`, `effort`, `max_windows`, `spend`, `threshold`, `max_attempts` | settings; empty means "use the default" (`spend`: a percentage, or `auto`) |
+| `model`, `effort`, `max_windows`, `spend`, `threshold`, `next_threshold`, `max_attempts` | settings; empty means "use the default" (`spend`: a percentage, or `auto`) |
 | `attempts` | attempts counted so far |
 | `created_at`, `updated_at`, `finished_at`, `seen_at` | `seen_at` drives the "new" mark |
 
@@ -1114,3 +1123,5 @@ Decided in review (2026-10-18):
     weekly reset instead of stopping the queue. The limit belongs to the
     running queue, not to the calendar week; a per-week limit would also
     cover queues started later in that week and can be added if needed.
+    A task can have a next-week threshold of its own, and the board header
+    shows the next week's limit, which can be changed from there.

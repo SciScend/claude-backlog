@@ -45,7 +45,8 @@ PRIORITY_NAMES = {v: k for k, v in PRIORITIES.items()}
 
 # Fields that can be changed while a task is not running.
 EDITABLE = {"title", "prompt", "priority", "model", "effort", "max_windows", "spend",
-            "threshold", "max_attempts", "project_dir", "base_branch", "after_task"}
+            "threshold", "next_threshold", "max_attempts", "project_dir", "base_branch",
+            "after_task"}
 # Fields fixed once the task has started, because its branch depends on them.
 FIXED_AFTER_START = {"project_dir", "base_branch", "after_task"}
 # A task that starts after another one may start once that one is in here.
@@ -219,9 +220,22 @@ def _title_from_prompt(prompt: str, skip=frozenset()) -> str:
     return "Untitled task"
 
 
+def _clean_threshold(value, key):
+    """A weekly threshold in percent, or None for the default."""
+    if value in (None, ""):
+        return None
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        raise TaskError(f"{key} must be a number between 1 and 100") from None
+    if not 1 <= value <= 100:
+        raise TaskError(f"{key} must be between 1 and 100")
+    return value
+
+
 def create(conn, prompt=None, project_dir=None, title=None, priority="normal",
            status="queued", model=None, effort=None, max_windows=None, spend=None,
-           threshold=None,
+           threshold=None, next_threshold=None,
            max_attempts=None, base_branch=None, after_task=None,
            description=None, merge_ref=None) -> dict:
     """A new task. Without a prompt but with a description, the task is
@@ -254,15 +268,16 @@ def create(conn, prompt=None, project_dir=None, title=None, priority="normal",
         conn.execute(
             """INSERT INTO tasks (id, title, prompt, project_dir, repo_root, subdir,
                    base_branch, after_task, status, priority, position, model, effort,
-                   max_windows, spend, threshold, max_attempts, description,
-                   draft_target, merge_ref, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   max_windows, spend, threshold, next_threshold, max_attempts,
+                   description, draft_target, merge_ref, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (task_id, title, prompt, str(project),
              info.root if info else None, info.subdir if info else None,
              base_branch if info else None, after_task, status, prio,
              _end_position(conn, status, prio), model or None, effort or None,
-             _clean_max_windows(max_windows), _clean_spend(spend), threshold,
-             max_attempts, description,
+             _clean_max_windows(max_windows), _clean_spend(spend),
+             _clean_threshold(threshold, "threshold"),
+             _clean_threshold(next_threshold, "next_threshold"), max_attempts, description,
              draft_target, merge_ref if info else None, now, now),
         )
     return get(conn, task_id)
@@ -306,10 +321,8 @@ def update(conn, task_id, changes: dict) -> dict:
             clean["subdir"] = info.subdir if info else None
             if "base_branch" not in changes:
                 clean["base_branch"] = (info.branch or "HEAD") if info else None
-        elif key == "threshold":
-            value = None if value in (None, "") else float(value)
-            if value is not None and not 1 <= value <= 100:
-                raise TaskError("threshold must be between 1 and 100")
+        elif key in ("threshold", "next_threshold"):
+            value = _clean_threshold(value, key)
         elif key == "max_attempts":
             value = None if value in (None, "") else int(value)
         elif key == "after_task":
@@ -529,8 +542,8 @@ def delete(conn, task_id) -> None:
 # --- task files ---------------------------------------------------------------
 
 FILE_FIELDS = ("title", "project", "priority", "status", "model", "effort",
-               "max-windows", "spend", "threshold", "max-attempts", "base-branch",
-               "after")
+               "max-windows", "spend", "threshold", "next-threshold", "max-attempts",
+               "base-branch", "after")
 
 
 def parse_task_file(text: str, default_project=None) -> dict:
@@ -573,6 +586,8 @@ def parse_task_file(text: str, default_project=None) -> dict:
             kwargs[dst] = meta[src]
     if meta.get("threshold"):
         kwargs["threshold"] = float(meta["threshold"])
+    if meta.get("next-threshold"):
+        kwargs["next_threshold"] = float(meta["next-threshold"])
     if meta.get("max-attempts"):
         kwargs["max_attempts"] = int(meta["max-attempts"])
     return kwargs
@@ -589,7 +604,7 @@ def format_task_file(task: dict) -> str:
         lines.append("status: hold")
     for key, field in (("model", "model"), ("effort", "effort"),
                        ("max-windows", "max_windows"), ("spend", "spend"),
-                       ("threshold", "threshold"),
+                       ("threshold", "threshold"), ("next-threshold", "next_threshold"),
                        ("max-attempts", "max_attempts"), ("base-branch", "base_branch"),
                        ("after", "after_task")):
         if task.get(field) not in (None, ""):

@@ -211,6 +211,11 @@ svg.icon {
   font-variant-numeric: tabular-nums;
 }
 .meter-text strong { color: var(--ink); }
+.meter-next {
+  font: inherit; color: inherit; background: none; border: 0; padding: 0;
+  cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px;
+}
+.meter-next:hover { color: var(--ink); }
 
 .controls { display: flex; gap: var(--s2); align-items: center; margin-left: auto; flex-wrap: wrap; }
 

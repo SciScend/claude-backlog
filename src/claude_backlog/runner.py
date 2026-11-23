@@ -448,12 +448,7 @@ class Runner:
         if effort:
             cmd += ["-e", effort]
         cmd += spend_args(task["spend"] or conf["spend"], conf["parallel"])
-        if conf["stay_in_week"] and self.started_at:
-            # Every attempt of this queue run belongs to the week it started in.
-            cmd += ["--week-of", f"{self.started_at:.0f}"]
-            if conf["next_week_threshold"]:
-                # ... and may go on into the next week, up to its own limit.
-                cmd += ["--next-threshold", conf["next_week_threshold"]]
+        cmd += week_args(conf, task["next_threshold"], self.started_at)
 
         env = dict(os.environ)
         if task["worktree"]:
@@ -582,6 +577,24 @@ class Runner:
     def _kill(self, proc) -> None:
         with contextlib.suppress(ProcessLookupError):
             os.killpg(proc.pid, signal.SIGKILL)
+
+
+def week_args(conf, own_next, started_at) -> list:
+    """nightshift's week arguments for an attempt.
+
+    With "stay in the week" every attempt of a queue run belongs to the week
+    the queue started in; the next week's threshold (the task's own, else the
+    setting) lets it go on into the week after, up to that threshold. A task
+    with a next-week threshold of its own goes on into the next week even
+    when the setting does not stay in the week.
+    """
+    if not started_at or not (conf["stay_in_week"] or own_next):
+        return []
+    args = ["--week-of", f"{started_at:.0f}"]
+    nxt = own_next or (conf["next_week_threshold"] if conf["stay_in_week"] else "")
+    if nxt:
+        args += ["--next-threshold", f"{float(nxt):g}"]
+    return args
 
 
 def spend_args(spend, parallel) -> list[str]:
