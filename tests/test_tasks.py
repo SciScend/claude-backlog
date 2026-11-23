@@ -175,8 +175,12 @@ def test_settings_defaults_and_validation(conn):
     conf = settings.update(conn, {"threshold": 60, "away_enabled": False})
     assert conf["threshold"] == 60.0
     assert conf["away_enabled"] is False
+    assert conf["next_week_threshold"] == ""
+    assert settings.update(conn, {"next_week_threshold": " 50 "})["next_week_threshold"] == "50"
     for bad in ({"threshold": 0}, {"threshold": "x"}, {"on_return": "maybe"},
-                {"nope": 1}, {"max_windows": "many"}, {"away_enabled": "yes"}):
+                {"nope": 1}, {"max_windows": "many"}, {"away_enabled": "yes"},
+                {"next_week_threshold": "0"}, {"next_week_threshold": "101"},
+                {"next_week_threshold": "half"}, {"next_week_threshold": 50}):
         with pytest.raises(ValueError):
             settings.update(conn, bad)
 

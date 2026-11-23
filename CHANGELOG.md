@@ -31,6 +31,11 @@ First version.
   queue stays in the week it started in: nightshift's `--week-of` stops it
   after the weekly reset (exit 6) instead of going on with the new week
   (setting "Stop when the weekly limit resets").
+- "At the weekly reset" in Settings: stop the queue, go on into the next
+  week with a limit of its own (for example all of this week, at most 50% of
+  the next), or go on with the same threshold. With the next week's limit, a
+  task that reaches this week's threshold waits for the reset and goes on
+  (nightshift's `--next-threshold`). The usage bar shows both limits.
 - Several tasks at once: a "Parallel tasks" setting (default 1). Each attempt
   has a budget of the weekly pool ("auto" splits what is left below the
   threshold between the parallel tasks; a percentage per task or as the

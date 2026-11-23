@@ -219,9 +219,17 @@
       <legend>Weekly limit</legend>
       <label>Stop when weekly usage reaches (%)
         <input name="threshold" type="number" min="1" max="100" step="1" required></label>
-      <label class="inline"><input name="stay_in_week" type="checkbox"> Stop when the weekly limit resets</label>
-      <small class="hint">The threshold counts from the start of the week. Without this,
-        a queue still running at the weekly reset goes on with the new week.</small>
+      <label>At the weekly reset
+        <select name="week_reset"><option value="stop">Stop the queue</option>
+          <option value="next">Go on into the next week, with a limit of its own</option>
+          <option value="same">Go on with the new week, same threshold</option></select></label>
+      <label id="next-week-field">Next week, stop when weekly usage reaches (%)
+        <input name="next_week_threshold" type="number" min="1" max="100" step="1"></label>
+      <small class="hint">The threshold counts from the start of the week, so after the
+        weekly reset it would allow the same share of the new week again. With "next
+        week", a task that reaches the threshold before the reset waits for the reset
+        and goes on until the next week's limit; a queue started in a later week stops
+        at once.</small>
     </fieldset>
     <fieldset>
       <legend>When I am away</legend>

@@ -451,6 +451,9 @@ class Runner:
         if conf["stay_in_week"] and self.started_at:
             # Every attempt of this queue run belongs to the week it started in.
             cmd += ["--week-of", f"{self.started_at:.0f}"]
+            if conf["next_week_threshold"]:
+                # ... and may go on into the next week, up to its own limit.
+                cmd += ["--next-threshold", conf["next_week_threshold"]]
 
         env = dict(os.environ)
         if task["worktree"]:

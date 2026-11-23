@@ -157,16 +157,30 @@ starts once your weekly usage is at or above it. A task can have its own
 limit.
 
 The limit counts from the start of the week, so a queue that is still
-running when the weekly limit resets would go on with the new week. With
-"Stop when the weekly limit resets" (Settings, on by default) every attempt
-belongs to the week in which the queue started: after the reset no new
-session starts and the queue stops. A session that is running at the reset
-is not cut short. The next Run now, or the next time you are away, uses the
-new week.
+running when the weekly limit resets would go on with the new week. "At the
+weekly reset" in Settings says what happens then:
+
+- **Stop the queue** (the default): every attempt belongs to the week in
+  which the queue started. After the reset no new session starts and the
+  queue stops. A session that is running at the reset is not cut short. The
+  next Run now, or the next time you are away, uses the new week.
+- **Go on into the next week, with a limit of its own**: for a week that is
+  nearly over. With the limit at 100% and the next week at 50%, a task may
+  use all that is left of this week; if it reaches the limit before the
+  reset, it waits for the reset and goes on until 50% of the next week.
+  The queue stops at the reset after that.
+- **Go on with the new week, same threshold**: the queue keeps going, and
+  the same limit applies to the new week.
+
+The next week's limit holds for the queue that is running. A queue you
+start later in the next week gets the usual limit again, so set it back
+(for example from 100% to 50%) once the week has turned.
 
 The board header shows usage the way the Claude Code statusline does, with
 the time left until each window resets:
-`5h 12% (2h05m) | 7d 38% (3d19h) | STOP at 50%`.
+`5h 12% (2h05m) | 7d 38% (3d19h) | STOP at 50%`, with the next week's
+limit added (`STOP at 100%, next week 50%`) when the queue may go on into
+it.
 
 Each attempt at a task may use two 5-hour windows by default. A task that is
 not finished goes back to its place in the queue and is tried again, up to

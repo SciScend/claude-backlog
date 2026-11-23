@@ -418,6 +418,24 @@ def test_attempts_stay_in_the_week_the_queue_started(conn, plain_dir, calls,
                                                                           abs=1)
     else:
         assert "--week-of" not in args
+    assert "--next-threshold" not in args
+
+
+@pytest.mark.parametrize("stay", [True, False])
+def test_the_queue_may_go_on_into_the_next_week(conn, plain_dir, calls, make_runner,
+                                                stay):
+    settings.update(conn, {"stay_in_week": stay, "next_week_threshold": "50",
+                           "threshold": 100})
+    tasks.create(conn, "x", plain_dir)
+    run_queue(make_runner())
+    args = calls()[0]["args"]
+    assert args[args.index("-t") + 1] == "100"
+    if stay:
+        assert "--week-of" in args
+        assert args[args.index("--next-threshold") + 1] == "50"
+    else:
+        # Without a week to stay in, there is no next week either.
+        assert "--next-threshold" not in args
 
 
 def test_the_end_of_the_week_stops_the_queue(conn, tmp_path, task_plans, calls,

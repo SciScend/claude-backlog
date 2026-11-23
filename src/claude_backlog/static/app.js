@@ -120,6 +120,13 @@ function render() {
   if (openTaskId) renderPanel();
 }
 
+// "STOP at 100%", and the next week's limit when the queue may go on into it.
+function stopText(threshold) {
+  const s = state.settings;
+  const next = s.stay_in_week && s.next_week_threshold;
+  return next ? `STOP at ${threshold}%, next week ${next}%` : `STOP at ${threshold}%`;
+}
+
 function renderHeader() {
   const { usage, settings, runner, presence, warnings } = state;
   const threshold = settings.threshold;
@@ -139,7 +146,7 @@ function renderHeader() {
     text.innerHTML = [
       limit("5h", u.five_hour_pct, u.five_hour_resets, now),
       limit("7d", pct, u.weekly_resets, now),
-      `STOP at ${threshold}%`,
+      stopText(threshold),
     ].filter(Boolean).join(" | ");
   } else {
     fill.style.width = "0";
@@ -1388,7 +1395,9 @@ async function openSettings() {
   const form = $("#settings-form");
   const s = state.settings;
   form.threshold.value = s.threshold;
-  form.stay_in_week.checked = s.stay_in_week;
+  form.week_reset.value = !s.stay_in_week ? "same" : s.next_week_threshold ? "next" : "stop";
+  form.next_week_threshold.value = s.next_week_threshold || "";
+  showNextWeek(form);
   form.away_enabled.checked = s.away_enabled;
   form.away_minutes.value = s.away_minutes;
   form.on_return.value = s.on_return;
@@ -1426,14 +1435,23 @@ async function openSettings() {
   } catch (err) { phone.textContent = err.message; }
 }
 
+// The next week's limit only matters when the queue goes on into that week.
+function showNextWeek(form) {
+  const next = form.week_reset.value === "next";
+  $("#next-week-field").hidden = !next;
+  form.next_week_threshold.required = next;
+}
+
 function setupSettings() {
   $("#open-settings").addEventListener("click", openSettings);
+  $("#settings-form").week_reset.addEventListener("change", (e) => showNextWeek(e.target.form));
   $("#settings-save").addEventListener("click", async () => {
     const form = $("#settings-form");
     if (!form.reportValidity()) return;
     const changes = {
       threshold: Number(form.threshold.value),
-      stay_in_week: form.stay_in_week.checked,
+      stay_in_week: form.week_reset.value !== "same",
+      next_week_threshold: form.week_reset.value === "next" ? form.next_week_threshold.value : "",
       away_enabled: form.away_enabled.checked,
       away_minutes: Number(form.away_minutes.value),
       on_return: form.on_return.value,
@@ -1492,7 +1510,7 @@ function setupMeterMark() {
   const show = (n) => {
     mark.style.left = `${n}%`;
     mark.setAttribute("aria-valuenow", n);
-    text.textContent = `STOP at ${n}%`;
+    text.textContent = stopText(n);
   };
 
   mark.addEventListener("pointerdown", (e) => {

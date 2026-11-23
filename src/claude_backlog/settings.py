@@ -36,6 +36,11 @@ DEFAULTS = {
     # Stop the queue when the weekly limit resets, instead of going on with
     # the new week (passed to nightshift as --week-of).
     "stay_in_week": True,
+    # With stay_in_week: let the queue go on into the next week, up to this
+    # share of it (passed to nightshift as --next-threshold). Reaching the
+    # threshold before the reset then waits for the reset. Empty: stop at the
+    # reset.
+    "next_week_threshold": "",
     # Start the queue when the screensaver has been on this long.
     "away_enabled": True,
     "away_minutes": 15,
@@ -82,6 +87,13 @@ def _is_percent(value) -> bool:
         return False
 
 
+def _is_whole_percent(value) -> bool:
+    try:
+        return 1 <= float(value) <= 100
+    except ValueError:
+        return False
+
+
 def _validate(key, value):
     if key not in DEFAULTS:
         raise ValueError(f"unknown setting {key!r}")
@@ -108,6 +120,8 @@ def _validate(key, value):
             raise ValueError("max_windows must be a number or 'auto'")
         if key == "spend" and value and value != "auto" and not _is_percent(value):
             raise ValueError("spend must be a percentage, 'auto' or empty")
+        if key == "next_week_threshold" and value and not _is_whole_percent(value):
+            raise ValueError("next_week_threshold must be between 1 and 100, or empty")
     if key in CHOICES and value not in CHOICES[key]:
         raise ValueError(f"{key} must be one of {sorted(CHOICES[key])}")
     return value
